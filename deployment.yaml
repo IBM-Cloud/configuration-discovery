@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: "api"
+  annotations:
+    kubernetes.io/change-cause: "terraform-provider-ibm-api:{{ .Values.TFPROVIDER_API_BUILD }}"
+spec:
+  strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 25%
+  revisionHistoryLimit: 9
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      terminationGracePeriodSeconds: 100
+      containers:
+      - name: api
+        image: us.icr.io/schematics/blueprint-api:{{ .Values.SCHEMATICS_API_BUILD }}
+        env:
+        - name: API_HTTPADDR
+          value: ""
+        - name: API_HTTPPORT
+          value: "9080"
+        ports:
+        - name: http
+          containerPort: 9080
+        command: ["docker run"]
+        args: ["--address=$(API_HTTPADDR)","--port=$(API_HTTPPORT)"]
+      nodeSelector:
+        servicetype: schematics
+      imagePullSecrets:
+        - name: image-repo-secret

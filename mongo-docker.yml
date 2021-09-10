@@ -1,0 +1,40 @@
+# File is meant to run docker containers for mongo db and mongo express console
+# Not working because main api container is not able to reach this mongodb container
+# Some problem with network. Main Container is using a different network and these 
+# two containers are using different
+# Use root/example as user/password credentials
+version: '3.1'
+
+services:
+
+  mongo:
+    image: mongo:latest
+    hostname: ""
+    container_name: mongo
+    restart: always
+    ports:
+    - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    # volumes:
+    #   mongodb-data:/data/db
+    # networks:
+    # - mongodb_network
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    restart: always
+    ports:
+    - 5882:5882
+    depends_on:
+    - mongo
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: example
+
+# networks:
+#   mongodb_network:
+#     name: mongodb_network

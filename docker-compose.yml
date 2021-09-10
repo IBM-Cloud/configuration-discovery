@@ -1,0 +1,16 @@
+version: '2'
+
+services:
+  db:
+    image: mongo
+    network_mode: "host"
+  web:
+    image: $API_IMAGE
+    environment:
+      - MOUNT_DIR=${MOUNT_DIR}
+    network_mode: "host"
+    ports:
+      - "9080:9080"
+    network_mode: "host"
+    depends_on:
+      - db
