@@ -1,4 +1,4 @@
-package utils
+package discovery
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/kelseyhightower/envconfig"
+
+	"github.com/IBM-Cloud/configuration-discovery/utils"
 )
 
 var (
@@ -79,9 +81,9 @@ func init() {
 		panic("MOUNT_DIR is not set. Please set MOUNT_DIR to continue")
 	}
 
-	logDir = currentDir + pathSep + "log"
-	stateDir = currentDir + pathSep + "state"
-	terraformerfWrapperDir = currentDir + pathSep + "terraformer_wrapper"
+	logDir = currentDir + utils.PathSep + "log"
+	stateDir = currentDir + utils.PathSep + "state"
+	terraformerfWrapperDir = currentDir + utils.PathSep + "terraformer_wrapper"
 
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		os.MkdirAll(logDir, os.ModePerm)

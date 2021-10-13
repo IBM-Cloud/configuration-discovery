@@ -23,6 +23,14 @@ type SlackMessage struct {
 	Attachments []Attachments `json:"attachments,omitempty"`
 }
 
+//ResultToSlack will send result to slack
+func ResultToSlack(outURL, errURL, action, randomID, status, webhook string) {
+
+	m := ComposeSlackMessage(outURL, errURL, action, randomID, status)
+	m.PostToSlack(webhook)
+
+}
+
 //ComposeSlackMessage  composes the mesage to slack
 func ComposeSlackMessage(outputURL, errorURL, action, id, actionStatus string) SlackMessage {
 	//SlackMessage encapsulatest the message to send to slack

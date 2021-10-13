@@ -4,7 +4,7 @@ metadata:
   name: api
   namespace: "api"
   annotations:
-    kubernetes.io/change-cause: "terraform-provider-ibm-api:{{ .Values.TFPROVIDER_API_BUILD }}"
+    kubernetes.io/change-cause: "configuration-discovery:{{ .Values.TFPROVIDER_API_BUILD }}"
 spec:
   strategy:
   type: RollingUpdate

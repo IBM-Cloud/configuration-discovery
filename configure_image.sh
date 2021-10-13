@@ -33,15 +33,15 @@ chmod 755 /go/bin
 # Compiles and installs the packages named by the import paths,
 # along with their dependencies.
 # -o apiserver to change the name .. change in Makefile as well then. 
-echo "\n### Installing terraform-provider-ibm-api as /go/bin/terraform-provider-ibm-api"
+echo "\n### Installing configuration-discovery as /go/bin/configuration-discovery"
 cd $API_REPO
 GOMOD=/go/bin go install -v -ldflags "-X main.commit=${gitSHA} -X main.travisBuildNumber=${travisBuildNo} -X main.buildDate=${buildDate}"
 if [ $? -ne 0 ] ; then
   echo "ERROR: failed while making go install command"
   exit 1
 fi
-mv /go/bin/terraform-provider-ibm-api /go/bin
-chmod 700 /go/bin/terraform-provider-ibm-api
+mv /go/bin/configuration-discovery /go/bin
+chmod 700 /go/bin/configuration-discovery
 
 # from now on use /tmp as current dir
 cd /tmp

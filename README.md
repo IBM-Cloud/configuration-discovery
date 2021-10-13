@@ -2,16 +2,88 @@
 
 Use "Configuration Discovery" to import the existing Cloud resources (in your account) and its configuration settings - to auto-generate the terraform configuration file (.tf) and state file (.tfstate).  It makes it easy for you to adopt the Infrastructure-as-Code practices; it can reverse engineer the current IBM Cloud environment (that was provisioned using UI or CLI).  
 
+Configuration Discovery tool is powered by [Terraformer](https://github.com/GoogleCloudPlatform/terraformer/). This Tool will augment the terraformer, with a number of capabilities that are native to IBM Cloud.
+
 ## Dependencies
 
--   [Terraform](https://www.terraform.io/downloads.html) 0.9.3+
--   [Terraformer](https://github.com/GoogleCloudPlatform/terraformer) 0.8.15+
--   [Go](https://golang.org/doc/install) 1.15+ (to build the discovery cli)
+-   [Terraform](https://www.terraform.io/downloads.html) 0.12.31 or 0.13+
+-   [Terraformer](https://github.com/GoogleCloudPlatform/terraformer) 0.8.17+
 -   [IBM Cloud Provider](https://github.com/IBM-Cloud/terraform-provider-ibm/)
--   [Mongodb](https://docs.mongodb.com/manual/installation/) v4.4.5+
+-   [Go](https://golang.org/doc/install) 1.15+ (to build the discovery tool)
+-   [Mongodb](https://docs.mongodb.com/manual/installation/) v4.4.5+ (to run as a server)
 
 
-## Steps to use the Configuration Discovery project
+## Installation
+
+### Configuration Discovery tool
+
+Run this command to install the Terraformer and Configuration Discovery tool:
+
+```
+curl -qL https://raw.githubusercontent.com/IBM-Cloud/configuration-discovery/main/install.sh | sh
+```
+
+You can download pre-built binaries for linux and macOS on the [releases page](https://github.com/IBM-Cloud/configuration-discovery/releases).
+
+### IBM Cloud Provider Plugin
+
+* Download the IBM Cloud provider plugin for Terraform from [release page](https://github.com/IBM-Cloud/terraform-provider-ibm/releases). 
+* Unzip the release archive to extract the plugin binary (`terraform-provider-ibm_vX.Y.Z`).
+* Move the binary into the Terraform [plugins directory](https://www.terraform.io/docs/configuration/providers.html#third-party-plugins) for the platform.
+    - Linux/Unix: `~/.terraform.d/plugins/linux_amd64/`
+    - Mac OS X: `~/.terraform.d/plugins/darwin_amd64/`
+
+## Usage
+
+```
+    $> discovery
+    NAME:
+        IBM Cloud Discovery CLI - Lets you create state file and TF Config from Resources in your cloud account. For the green field and brown field imports of config and statefile, and all terraformer related
+
+    USAGE:
+        discovery [global options] command [command options] [arguments...]
+
+    VERSION:
+        0.1.1
+
+    COMMANDS:
+        help, h  Shows a list of commands or help for one command
+
+        discovery:
+            version            discovery version
+            config, configure  discovery config [--config_name CONFIG_NAME]
+            import             discovery import --services SERVICES_TO_IMPORT [--tags TAGS] [--config_name CONFIG_NAME] [--compact]
+
+    GLOBAL OPTIONS:
+        --help, -h     show help
+        --version, -v  print the version
+```
+
+### Configuration Discovery Commands
+
+Below commands help you to import your resources into terraform configuration. For more detailed description, run `discovery help`. For help on a command, run `discovery help <command>`
+
+| Command                           | Description                                                                                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| discovery version | IBM Cloud Discovery CLI version. Gives you other dependency information. Shows all supported importable resources|
+| discovery config  | Create a local configuration directory for exporting the terrraform configuration and state files    |
+| discovery import  | Import TF config and state for resources in your ibm cloud account. Import all the resources for this service|
+
+You are now ready to use the [Configuration Discovery tool](cmd/discovery/tutorial.md) tutorial.
+
+## Capabilities
+
+- [Green-field scenario - importing the existing infrastructure on a clean state](cmd/discovery/capabilities.md#green-field-import-scenario )
+- [Upgrading the Terraform state file to the latest Terraform versions](cmd/discovery/capabilities.md#upgrading-the-terraform-state-file-to-the-latest-terraform-versions)
+
+## Future Enhancements
+
+- Brown-field scenario - importing the existing infrastructure and merge the generated Terraform files into the presence of already existing Terraform files.
+- Rewrite Terraform resource into Terraform modules.
+- Supports integration of the Configuration Discovery tool into the [VS Code extension for IBM Cloud Schematics](https://www.ibm.com/cloud/blog/announcements/introducing-the-visual-studio-code-extension-for-ibm-cloud-schematics)
+
+
+## Steps to use the Configuration Discovery
 ### Files
 
 *   main.go
@@ -20,11 +92,11 @@ Use "Configuration Discovery" to import the existing Cloud resources (in your ac
 
 *   cmd/discovery
 
-    Code for the executable.
+    Code for the tool.
 
-### Steps to use the project as an executable
+### Steps to use the project as an tool
 
-*  Build and install the executable to your GOPATH
+*  Build and install the tool to your GOPATH
 
        make install-cli
 
@@ -35,17 +107,18 @@ Use "Configuration Discovery" to import the existing Cloud resources (in your ac
 
 *  Example commands
 
+       discovery version
        discovery config --config_name testfolder
        discovery import --services ibm_is_vpc --config_name testfolder --compact --merge
 
 
-### Steps to use the project as a server 
+### Steps to use as a server
  <!-- todo: @anil - add the swagger api link here, may be later we can host the swagger github page if needed -->
 
 *  Start the server
 
         cd /go/src/github.com
-        git clone git@github.ibm.com:IBMTerraform/configuration-discovery/.git
+        git clone git@github.com:IBM-Cloud/configuration-discovery.git
         cd configuration-discovery/
         go run main.go docs.go
         http://localhost:8080
@@ -56,7 +129,7 @@ Use "Configuration Discovery" to import the existing Cloud resources (in your ac
 
 ### How to run the Configuration Discovery as a docker container
 
-*  Or run as docker container
+*  Run as docker container
 
        make docker-build
        make docker-run
@@ -66,11 +139,10 @@ Use "Configuration Discovery" to import the existing Cloud resources (in your ac
         make docker-run-mongo
         
 
-
-### How to run the terraform-ibmcloud-provider-api as a container
+### How to run the configuration discovery as a container
         
         cd /go/src/github.com
-        git clone git@github.ibm.com:IBMTerraform/configuration-discovery/.git
+        git clone git@github.com:IBM-Cloud/configuration-discovery.git
         cd configuration-discovery/
         docker build -t configuration-discovery .
         docker images
@@ -80,45 +152,14 @@ Use "Configuration Discovery" to import the existing Cloud resources (in your ac
 ### Contributing to Configuration Discovery
 
 Please have a look at the [CONTRIBUTING.md](./CONTRIBUTING.md) file for some guidance before
-submitting a pull request. Thank you for your help and interest!
-
-
-## Discovery executable
-
-### Install
-
-Head over to the [releases page](https://github.com/anilkumarnagaraj/terraform-provider-ibm-api/releases) and download the latest release and place it under the path. For example,
-
-```
-wget https://github.com/anilkumarnagaraj/terraform-provider-ibm-api/releases/download/v0.1.1/discovery_0.1.1_darwin_arm64.zip
-untar discovery_0.1.1_darwin_arm64.zip
-mv discovery <$GOPATH/bin or any other directory in path>
-```
-
-### Install using go
-
-If you have go installed, run this command 
-<!-- Need to verify and update this. Add the -u flag to update -->
-```
-go install github.com/anilkumarnagaraj/terraform-provider-ibm-api/cmd/discovery
-```
-### Commands
-
-Below commands help you to import your resources into terraform configuration. For more detailed description, run `discovery help`. For help on a command, run `discovery help <command>`
-
-| Command                           | Description                                                                                                                                                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| discovery version | IBM Cloud Discovery CLI version. Gives you other dependency information. Shows all supported importable resources                    |
-| discovery config                         | Create a local configuration directory for importing the terrraform configuration.    |
-| discovery import | Import TF config for resources in your ibm cloud account. Import all the resources for this service. Imports config and statefile. If a statefile is already present, merging will be done.        |
-
-Start using [discovery executable](cmd/discovery/tutorial.md)
+submitting a pull request.
 
 
 ## Report a Issue / Feature request
 
 -   Is something broken? Have a issue/bug to report? use the [Bug report](https://github.com/IBM-Cloud/configuration-discovery/issues/new?assignees=&labels=&template=bug_report.md&title=) link. But before raising a issue, please check the [issues list](https://github.com/IBM-Cloud/configuration-discovery/issues) to see if the issue is already raised by someone
 -   Do you have a new feature or enhancement you would like to see? use the [Feature request](https://github.com/IBM-Cloud/configuration-discovery/issues/new?assignees=&labels=&template=feature_request.md&title=) link.
+-   Head to [config-discovery-users](https://ibm-cloud-schematics.slack.com/archives/C02GU9WNN4S) slack channel to engage with the team.
 
 ## License
 
