@@ -1,9 +1,7 @@
-// @SubApi ibmcloud-terraform-provider [/v1]
-// @SubApi Allows you access ibm cloud terraform provider api [/v1]
-
-package utils
+package discovery
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -12,12 +10,18 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"time"
 
+	"github.com/IBM-Cloud/configuration-discovery/terraformwrapper"
+	"github.com/IBM-Cloud/configuration-discovery/utils"
 	"github.com/gorilla/mux"
 	mgo "gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
+
+// todo: @srikar - remove current dir usage
+// todo: @srikar - context background
 
 // var httpClient *http.Client
 // var sessionMgo *mgo.Session
@@ -28,29 +32,29 @@ var planTimeOut = 60 * time.Minute
 
 // ConfigRequest -
 type ConfigRequest struct {
-	GitURL        string            `json:"git_url,required" description:"The git url of your configuraltion"`
+	GitURL        string            `json:"git_url" description:"The git url of your configuraltion"`
 	ConfigName    string            `json:"config_name,omitempty" description:"The configuration repo name"`
 	VariableStore *VariablesRequest `json:"variablestore,omitempty" description:"The environments' variable store"`
 	LOGLEVEL      string            `json:"log_level,omitempty" description:"The log level defing by user."`
-	// Terraformer   string            `json:"terraformer,omitempty" description:"The terraformer."`
-	Service string `json:"service,omitempty" description:"The terraformer services."`
+	Terraformer   string            `json:"terraformer,omitempty" description:"The terraformer."`
+	Service       string            `json:"service,omitempty" description:"The terraformer services."`
 }
 
 // ConfigResponse -
 type ConfigResponse struct {
-	ConfigName string `json:"config_name,required" description:"configuration name"`
+	ConfigName string `json:"config_name" description:"configuration name"`
 }
 
 // StatusResponse -
 type StatusResponse struct {
-	Status string `json:"status,required" description:"Status of the terraform operation."`
+	Status string `json:"status" description:"Status of the terraform operation."`
 	Error  string `json:"error,omitempty" description:"Error of the terraform operation."`
 }
 
 // ActionResponse -
 type ActionResponse struct {
-	ConfigName string `json:"id,required" description:"Name of the configuration"`
-	Action     string `json:"action,required" description:"Action Name"`
+	ConfigName string `json:"id" description:"Name of the configuration"`
+	Action     string `json:"action" description:"Action Name"`
 	ActionID   string `json:"action_id"`
 	Timestamp  string `json:"timestamp"`
 	Status     string `json:"status"`
@@ -58,8 +62,8 @@ type ActionResponse struct {
 
 // ActionDetails -
 type ActionDetails struct {
-	ConfigName string `json:"id,required" description:"Name of the configuration"`
-	Action     string `json:"action,required" description:"Action Name"`
+	ConfigName string `json:"id" description:"Name of the configuration"`
+	Action     string `json:"action" description:"Action Name"`
 	ActionID   string `json:"action_id"`
 	Output     string `json:"output"`
 	Error      string `json:"error"`
@@ -70,23 +74,8 @@ type VariablesRequest []EnvironmentVariableRequest
 
 // EnvironmentVariableRequest -
 type EnvironmentVariableRequest struct {
-	Name  string `json:"name,required" binding:"required" description:"The variable's name"`
-	Value string `json:"value,required" binding:"required" description:"The variable's value"`
-}
-
-func init() { // todo: @srikar - is this needed
-
-	if currentDir == "" {
-		panic("MOUNT_DIR is not set. Please set MOUNT_DIR to continue")
-	}
-
-	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		os.MkdirAll(logDir, os.ModePerm)
-	}
-	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
-		os.MkdirAll(stateDir, os.ModePerm)
-	}
-
+	Name  string `json:"name" binding:"required" description:"The variable's name"`
+	Value string `json:"value" binding:"required" description:"The variable's value"`
 }
 
 //ConfHandler handles request to kickoff git clone of the repo.
@@ -113,30 +102,44 @@ func ConfHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 		// Unmarshal
 		var msg ConfigRequest
 		var response ConfigResponse
+		var configName string
 		err = json.Unmarshal(b, &msg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		log.Println(msg.GitURL)
-		if msg.GitURL == "" {
-			w.WriteHeader(400)
-			w.Write([]byte("EMPTY GIT URL"))
-			return
+
+		if msg.GitURL == "" && msg.ConfigName == "" {
+			//Create discovery directory to import tf/state file of services
+			configName = "discovery"
+			err = utils.CreateDir(currentDir + utils.PathSep + configName)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else if msg.ConfigName != "" {
+			//Create config directory to import tf/state file of discovery services
+			configName = msg.ConfigName
+			err = utils.CreateDir(currentDir + utils.PathSep + configName)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			log.Println(msg.GitURL)
+			log.Println("Will clone git repo")
+			_, configName, err := CloneRepo(msg)
+			if err != nil {
+				log.Println("Eror Cloning repo..")
+				log.Printf("err : %v\n", err)
+				return
+			}
+			log.Println("\n", configName)
 		}
 
 		if msg.LOGLEVEL != "" {
 			os.Setenv("TF_LOG", msg.LOGLEVEL)
 		}
-
-		log.Println("Will clone git repo")
-
-		_, configName, err := CloneRepo(msg)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Println("\n", configName)
 
 		response.ConfigName = configName
 		log.Println(response)
@@ -146,17 +149,6 @@ func ConfHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		confDir := path.Join(currentDir, configName)
-
-		b = make([]byte, 10)
-		rand.Read(b)
-		randomID := fmt.Sprintf("%x", b)
-
-		err = TerraformInit(confDir, planTimeOut, randomID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("content-type", "application/json")
 		w.Write(output)
 	}
@@ -173,7 +165,7 @@ func ConfHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 // @Router /v1/configuration/{repo_name} [delete]
 func ConfDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "DELETE" {
-		http.Error(w, "Invalid request method.", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid request method.", 405)
 	}
 
 	vars := mux.Vars(r)
@@ -183,7 +175,7 @@ func ConfDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(404)
 		log.Println(err)
-		w.Write([]byte(fmt.Sprintf("There is no config repo file for this request.")))
+		w.Write([]byte("There is no config repo file for this request."))
 		return
 	}
 	log.Println("Deleted repo....")
@@ -219,15 +211,15 @@ func PlanHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 		rand.Read(b)
 		randomID := fmt.Sprintf("%x", b)
 
-		outURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".out"
-		errURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".err"
+		outURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".out"
+		errURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".err"
 
 		// Post to slack that the action has started and the link logs
-		ResultToSlack(outURL, errURL, "plan", randomID, "In-Progress", webhook)
+		utils.ResultToSlack(outURL, errURL, "plan", randomID, "In-Progress", webhook)
 
 		go func() {
-			PullRepo(repoName)
-			err := TerraformPlan(confDir+pathSep+repoName, planTimeOut, randomID)
+			pullRepo(repoName)
+			err := terraformwrapper.TerraformPlan(confDir, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -248,7 +240,7 @@ func PlanHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			ResultToSlack(outURL, errURL, "plan", randomID, "Completed", webhook)
+			utils.ResultToSlack(outURL, errURL, "plan", randomID, "Completed", webhook)
 		}()
 
 		w.WriteHeader(202)
@@ -304,13 +296,14 @@ func ApplyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 		rand.Read(b)
 		randomID := fmt.Sprintf("%x", b)
 
-		outURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".out"
-		errURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".err"
-		ResultToSlack(outURL, errURL, "apply", randomID, "In-Progress", webhook)
+		outURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".out"
+		errURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".err"
+		utils.ResultToSlack(outURL, errURL, "apply", randomID, "In-Progress", webhook)
 		go func() {
 
-			PullRepo(repoName)
-			err := TerraformApply(confDir, stateDir, repoName, planTimeOut, randomID)
+			pullRepo(repoName)
+			// todo: @srikar - repoName as statefilename ??
+			err := terraformwrapper.TerraformApply(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -323,7 +316,7 @@ func ApplyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			statusResponse.Status = "Completed"
-			ResultToSlack(outURL, errURL, "apply", randomID, statusResponse.Status, webhook)
+			utils.ResultToSlack(outURL, errURL, "apply", randomID, statusResponse.Status, webhook)
 			err = UpdateMongodb(s, randomID, statusResponse.Status)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -381,11 +374,12 @@ func DestroyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request)
 		rand.Read(b)
 		randomID := fmt.Sprintf("%x", b)
 
-		outURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".out"
-		errURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".err"
-		ResultToSlack(outURL, errURL, "destroy", randomID, "In-Progress", webhook)
+		outURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".out"
+		errURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".err"
+		utils.ResultToSlack(outURL, errURL, "destroy", randomID, "In-Progress", webhook)
 		go func() {
-			err := TerraformDestroy(confDir, stateDir, repoName, planTimeOut, randomID)
+			// todo: @srikar - repo name as statefile name? name better
+			err := terraformwrapper.TerraformDestroy(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -398,7 +392,7 @@ func DestroyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			statusResponse.Status = "Completed"
-			ResultToSlack(outURL, errURL, "destroy", randomID, "Completed", webhook)
+			utils.ResultToSlack(outURL, errURL, "destroy", randomID, "Completed", webhook)
 			err = UpdateMongodb(s, randomID, statusResponse.Status)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -460,11 +454,12 @@ func ShowHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 		rand.Read(b)
 		randomID := fmt.Sprintf("%x", b)
 
-		outURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".out"
-		errURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".err"
-		ResultToSlack(outURL, errURL, "show", randomID, "In-Progress", webhook)
+		outURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".out"
+		errURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".err"
+		utils.ResultToSlack(outURL, errURL, "show", randomID, "In-Progress", webhook)
 		go func() {
-			err := TerraformShow(confDir, stateDir, repoName, planTimeOut, randomID)
+			// todo: @srikar - repoName as statefilename ? name better
+			err := terraformwrapper.TerraformShow(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -476,11 +471,11 @@ func ShowHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			outURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".out"
-			errURL := "http://" + r.Host + "/" + r.URL.Path + "/" + randomID + ".err"
+			outURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".out"
+			errURL := "http://" + r.Host + utils.PathSep + r.URL.Path + utils.PathSep + randomID + ".err"
 
 			statusResponse.Status = "Completed"
-			ResultToSlack(outURL, errURL, "show", randomID, statusResponse.Status, webhook)
+			utils.ResultToSlack(outURL, errURL, "show", randomID, statusResponse.Status, webhook)
 			err = UpdateMongodb(s, randomID, statusResponse.Status)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -534,9 +529,9 @@ func LogHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Url Param 'action' is: " + action)
 	log.Println("Url Param 'actionID' is: " + actionID)
 
-	outFile, errFile, err := readLogFile(actionID)
+	outFile, errFile, err := terraformwrapper.ReadLogFile(actionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, err.Error(), 404)
 		return
 	}
 
@@ -607,7 +602,7 @@ func StatusHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) 
 func ViewLogHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != "GET" {
-		http.Error(w, "Invalid request method.", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid request method.", 405)
 		return
 	}
 	vars := mux.Vars(r)
@@ -617,7 +612,7 @@ func ViewLogHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(404)
 		log.Println(err)
-		w.Write([]byte(fmt.Sprintf("There is no log file for this request")))
+		w.Write([]byte("There is no log file for this request"))
 		return
 	}
 	w.WriteHeader(200)
@@ -657,6 +652,210 @@ func GetActionDetailsHandler(s *mgo.Session) func(w http.ResponseWriter, r *http
 
 		output, err := json.MarshalIndent(actionResponse, "", "  ")
 
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		w.Write(output)
+
+	}
+}
+
+//TerraformerImportHandler handles request to get the terraform resources & state file.
+// @Title TerraformerImportHandler
+// @Description Get status of the action.
+// @Param   repo_name   path     string      true "repo name"
+// @Param   service     query    string     true "service"
+// @Accept  json
+// @Produce  json
+// @Success 200 {object} StatusResponse
+// @Failure 404 {object} string
+// @Failure 500 {object} string
+// @Router /v1/configuration/{repo_name}/import [POST]
+func TerraformerImportHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session := s.Copy()
+		defer session.Close()
+
+		var actionResponse ActionResponse
+		var statusResponse StatusResponse
+
+		// Read body
+		b, err := ioutil.ReadAll(r.Body)
+		defer r.Body.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Read Query Parameter
+		configName := r.URL.Query().Get("repo_name")
+		services := r.URL.Query().Get("services")
+		command := r.URL.Query().Get("command")
+		tags := r.URL.Query().Get("tags")
+
+		// todo: @srikar - where are we using opts
+		opts := []string{}
+		func() {
+			if services != "" {
+				opts = append(opts, "--resources="+services)
+			}
+			if tags != "" {
+				splittedTags := strings.Split(tags, ",")
+				fmt.Println(splittedTags)
+				if len(splittedTags) > 0 {
+					for _, v := range splittedTags {
+						tag := strings.SplitN(v, ":", 2)
+						if len(tag) == 2 {
+							opts = append(opts, fmt.Sprintf("--%s=%s", strings.TrimSpace(strings.ToLower(tag[0])), tag[1]))
+						}
+					}
+				}
+			}
+		}()
+		opts = append(opts, "--compact")
+
+		b = make([]byte, 10)
+		rand.Read(b)
+		randomID := fmt.Sprintf("%x", b)
+
+		//Clean up discovery directory
+		// todo: @srikar - config_name  may have to be used
+		discoveryDir := currentDir + utils.PathSep + "discovery"
+		err = utils.RemoveDir(discoveryDir + "/*")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		go func() {
+			if command == "default" {
+				if configName != "discovery" {
+					discoveryDir = currentDir + utils.PathSep + configName
+				}
+				err = DiscoveryImport(context.Background(), services, tags, true, randomID, discoveryDir)
+				if err != nil {
+					statusResponse.Error = err.Error()
+					statusResponse.Status = "Failed"
+
+					// Update the status in the db in case it is failed
+					err = UpdateMongodb(s, randomID, statusResponse.Status)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					return
+				}
+				statusResponse.Status = "Completed"
+				// Update the status in the db in case it is completed
+				err = UpdateMongodb(s, randomID, statusResponse.Status)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}()
+
+		if command != "merge" && command != "default" {
+			errMsg := "command value not supported. Please provide 'default' or 'merge' as command value!!"
+			log.Printf("# '%s' %s ", command, errMsg)
+
+			w.WriteHeader(500)
+			actionResponse.Status = errMsg
+		} else {
+			w.WriteHeader(200)
+			actionResponse.Status = "In-Progress"
+		}
+
+		actionResponse.Action = "import"
+		actionResponse.ConfigName = configName
+		actionResponse.ActionID = randomID
+		actionResponse.Timestamp = time.Now().Format("20060102150405")
+
+		// Make an entry in the db
+		InsertMongodb(s, actionResponse)
+
+		output, err := json.MarshalIndent(actionResponse, "", "  ")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		w.Write(output)
+
+	}
+}
+
+//TerraformerStateHandler handles request to get the terraform resources & state file.
+// @Title TerraformerImportHandler
+// @Description Get status of the action.
+// @Param   repo_name   path     string      true "repo name"
+// @Param   service     query    string     true "service"
+// @Accept  json
+// @Produce  json
+// @Success 200 {object} StatusResponse
+// @Failure 404 {object} string
+// @Failure 500 {object} string
+// @Router /v1/configuration/{repo_name}/import [GET]
+func TerraformerStateHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("get state file handelr....")
+		session := s.Copy()
+		defer session.Close()
+
+		var actionResponse ActionResponse
+
+		// Read body
+		b, err := ioutil.ReadAll(r.Body)
+		defer r.Body.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Read Query Parameter
+		services := r.URL.Query().Get("service")
+		configName := "terraformer"
+		confDir := path.Join(currentDir, configName)
+
+		b = make([]byte, 10)
+		rand.Read(b)
+		randomID := fmt.Sprintf("%x", b)
+
+		go func() {
+
+			//Merge state files and templates
+			b = make([]byte, 10)
+			rand.Read(b)
+
+			s := strings.Split(services, ",")
+			if len(s) > 0 {
+				for _, srv := range s {
+					srvDir := confDir + "/generated" + "/ibm/" + srv
+
+					//Backup TF file.
+					err = utils.Copy(srvDir+"/terraform.tfstate_backup", srvDir+"/terraform.tfstate")
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+
+				}
+			}
+
+		}()
+
+		w.WriteHeader(200)
+
+		actionResponse.Action = "statefile"
+		actionResponse.ConfigName = configName
+		actionResponse.ActionID = randomID
+		actionResponse.Timestamp = time.Now().Format("20060102150405")
+		actionResponse.Status = "Completed"
+
+		// Make an entry in the db
+		InsertMongodb(s, actionResponse)
+
+		output, err := json.MarshalIndent(actionResponse, "", "  ")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

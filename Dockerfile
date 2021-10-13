@@ -5,7 +5,7 @@ ARG gitSHA
 ARG travisBuildNo
 ARG buildDate
 
-ARG API_REPO=/go/src/github.com/terraform-provider-ibm-api
+ARG API_REPO=/go/src/github.com/configuration-discovery
 
 COPY . $API_REPO
 
@@ -23,4 +23,4 @@ WORKDIR $API_REPO
 
 # Run the application as root process
 # To pass HTTP addr and port other than localhost:8080, Docker run with flags
-CMD ["terraform-provider-ibm-api"]
+CMD ["configuration-discovery"]

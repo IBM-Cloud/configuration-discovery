@@ -1,19 +1,22 @@
-package utils
+package discovery
 
 import (
 	"fmt"
-	"io"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+
+	"github.com/IBM-Cloud/configuration-discovery/utils"
+	"github.com/hashicorp/go-version"
 )
 
 var stdouterr []byte
 
 //It will clone the git repo which contains the configuration file.
 func CloneRepo(msg ConfigRequest) ([]byte, string, error) {
-	var err error
 	gitURL := msg.GitURL
 	urlPath, err := url.Parse(msg.GitURL)
 	if err != nil {
@@ -22,11 +25,9 @@ func CloneRepo(msg ConfigRequest) ([]byte, string, error) {
 	baseName := filepath.Base(urlPath.Path)
 	extName := filepath.Ext(urlPath.Path)
 	p := baseName[:len(baseName)-len(extName)]
-	if _, err = os.Stat(currentDir + pathSep + p); err == nil {
-		stdouterr, err = PullRepo(p)
-		if err != nil {
-			return nil, "", err
-		}
+	if _, err := os.Stat(currentDir + "/" + p); err == nil {
+		stdouterr, err = pullRepo(p)
+
 	} else {
 		cmd := exec.Command("git", "clone", gitURL)
 		fmt.Println(cmd.Args)
@@ -36,19 +37,19 @@ func CloneRepo(msg ConfigRequest) ([]byte, string, error) {
 			return nil, "", err
 		}
 	}
-	path := currentDir + pathSep + p + pathSep + "terraform.tfvars"
-	if _, err = os.Stat(path); os.IsNotExist(err) {
-		CreateFile(msg, path)
+	path := currentDir + "/" + p + "/terraform.tfvars"
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		createFile(msg, path)
 	} else {
 		err = os.Remove(path)
-		CreateFile(msg, path)
+		createFile(msg, path)
 	}
 
 	return stdouterr, p, err
 }
 
 //It will create a vars file
-func CreateFile(msg ConfigRequest, path string) {
+func createFile(msg ConfigRequest, path string) {
 	// detect if file exists
 
 	_, err := os.Stat(path)
@@ -65,10 +66,10 @@ func CreateFile(msg ConfigRequest, path string) {
 	writeFile(path, msg)
 }
 
-func PullRepo(repoName string) ([]byte, error) {
+func pullRepo(repoName string) ([]byte, error) {
 	cmd := exec.Command("git", "pull")
 	fmt.Println(cmd.Args)
-	cmd.Dir = currentDir + pathSep + repoName
+	cmd.Dir = currentDir + "/" + repoName
 	stdoutStderr, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, err
@@ -94,7 +95,10 @@ func writeFile(path string, msg ConfigRequest) {
 
 	if variables != nil {
 		for _, v := range *variables {
-			_, _ = file.WriteString(v.Name + " = \"" + v.Value + "\" \n")
+			_, err = file.WriteString(v.Name + " = \"" + v.Value + "\" \n")
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -105,45 +109,28 @@ func writeFile(path string, msg ConfigRequest) {
 	}
 }
 
-func RemoveDir(path string) (err error) {
-	contents, err := filepath.Glob(path)
-	if err != nil {
-		return
+func ValidateExportedFiles(discoveryDir string) (bool, error) {
+	// check for terraform file existence
+	isTfExit, err := utils.IsFileExists(discoveryDir + "/outputs.tf")
+	if !isTfExit {
+		return false, fmt.Errorf("Error in importing resources.")
 	}
-	for _, item := range contents {
-		err = os.RemoveAll(item)
-		if err != nil {
-			return
-		}
-	}
-	return
-}
 
-func CreateDir(dirName string) error {
-	err := os.Mkdir(dirName, 0777)
+	// Check terraform version compatible
+	reTerraformversion, _ := regexp.Compile("Terraform v(.*)[\\s]")
+	cmd := exec.Command("terraform", "version")
+	sysOutput, err := cmd.Output()
 	if err != nil {
-		return err
+		log.Println("Error running command :", err)
 	}
-	return nil
-}
 
-// Copy ..
-func Copy(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
+	tfVersion := string(sysOutput)
+	results := reTerraformversion.FindStringSubmatch(tfVersion)
+	v1, err := version.NewVersion("0.12.31")
+	v2, err := version.NewVersion(results[1])
+	if v2.LessThanOrEqual(v1) {
+		return false, nil
 	}
-	defer in.Close()
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	if err != nil {
-		return err
-	}
-	return out.Close()
+	return true, nil
 }
