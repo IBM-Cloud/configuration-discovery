@@ -1,35 +1,40 @@
 # IBM Cloud Configuration Discovery
 
-The objective of this executable is make life easy for people having to write terraform code for their existing resources. If you already have your infrastructure provisioned on IBM cloud and you're now moving to IaC, this tool will help you. This executable will be available as standalone as well as part of the [schematics vscode extension](https://github.ibm.com/vishwak1/vscode-ibmcloud-schematics). For more general understanding of IBM Cloud Configuration Discovery, read this [blog](https://ibm.box.com/s/0ou4erd2t65ndiv1v83egfjgle699pcy).
+The objective of this tutorial is to show how to use the IBM Cloud Configuration Discovery capability. If you already have your infrastructure provisioned on IBM cloud and you're now moving to Infastructure-as-code (IaC), this tool will help you. This tool will be available as standalone as well as part of the [Schematics vscode extension](https://github.com/IBM-Cloud/vscode-ibmcloud-schematics). For more general understanding of IBM Cloud Configuration Discovery, read this [blog](https://ibm.box.com/s/0ou4erd2t65ndiv1v83egfjgle699pcy).
 
 <!-- todo Change the vscode extension link to public extension page later -->
 <!-- todo Change the box link to blog link -->
 
 
-## Using the discovery executable
+## Usage
 
-To use the discovery executable, [terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli) and [terrafomer](https://github.com/GoogleCloudPlatform/terraformer/releases) are prerequisites. 
+To use the configuration discovery tool, [terraform](https://learn.hashicorp.com/tutorials/terraform/install-cli) and [terrafomer](https://github.com/GoogleCloudPlatform/terraformer/releases) are prerequisites. 
 
+### Install precompiled binary by running command
+
+```
+curl -qL https://github.com/IBM-Cloud/configuration-discovery/install.sh | sh
+```
 
 ### Build from code
 
-- Clone and install the executable to your GOPATH
+- Clone and install the tool to your GOPATH
     ```
         make install-cli
     ```
 
-### Install precompiled binary
+### Install precompiled binary manually
 
-- Head over to the [releases page](https://github.com/anilkumarnagaraj/terraform-provider-ibm-api/releases) and download the appropriate latest release. 
-- After downloading discovery, unzip the package. Discovery runs as a single binary named terraform. 
-- Place the binary under the path. For example,
+- Download the binary file from the latest [release](https://github.com/IBM-Cloud/configuration-discovery/releases).
+- Rename the file to discovery, ensure it is executable, and place the binary under the path. For example,
+
     ```
         mv discovery <$GOPATH/bin or any other directory in path>
     ```
 
 - Or, If you have go installed, run this command 
     ```
-        go install github.com/anilkumarnagaraj/terraform-provider-ibm-api/cmd/discovery
+        go install github.com/IBM-Cloud/configuration-discovery/cmd/discovery
     ```
 
 <!-- Need to verify and update this. Add the -u flag to update -->
@@ -51,7 +56,7 @@ To use the discovery executable, [terraform](https://learn.hashicorp.com/tutoria
 
 - Run `discovery version`. This will show the version of the discovery binary and all the services and resources that can be imported. Here is the list of services and the supported resources.
     ```
-        Discovery v0.0.1 on unix
+        Configuration Discovery v0.0.1 on unix
         List of IBM Cloud resources that can be imported:
         services                    resources
         ibm_kp                      ibm_resource_instance
@@ -133,6 +138,10 @@ To use the discovery executable, [terraform](https://learn.hashicorp.com/tutoria
                                     ibm_dns_glb_monitor
                                     ibm_dns_glb_pool
                                     ibm_dns_glb
+
+        ibm_satellite
+                                    ibm_satellite_location
+                                    ibm_satellite_host                           
     ```
 
 - You have a vpc created in the IBM cloud, but now you want to maintain this vpc using terraform. 
@@ -167,11 +176,116 @@ To use the discovery executable, [terraform](https://learn.hashicorp.com/tutoria
     ```
 
 
-<!-- verify the redis example -->
+## Validating & Re-creating the Environment
+
+Now that we’ve captured the environment into Terraform files using the Configuration Discovery tool, you can re-create that environment in the IBM Cloud using Schematics. Let’s walk through doing that.
+
+### Scenario
+
+You’ve manually created an IBM Kubernetes Service and a VPC on the IBM Cloud, you’ve deployed your application, and it’s working perfectly. Now, you want to put that into production just as you have it, using Infrastructure as Code, so you’ve run the Configuration Discovery tool, and captured that environment to Terraform files. These are the files you’ve captured
+
+```
+* resources.tf -  Provides the configuration.
+* terraform.tfstate  -  Holds the last-known state of the infrastructure.
+* variables.tf  -  Contain values for the declared variables.
+* provider.tf   - Define which providers require for terraform to install and use.
+* outputs.tf - Allow you to export structured data about your infrastructure.
+```
+
+These represent the environment you saved and want to duplicated. In this case, you are ready to go to full production, so you want to create 3 environments: Dev, Staging, and Prod. To create three different environments, you’ll need to take those files and duplicate them, one set for each environment type, and edit the files and inject new input values that are unique to each environment. 
+
+    .
+    ├── ...
+    ├── MyApp-Dev               
+    │   ├── resources.tf    
+    │   ├── terraform.tfstate
+    │   ├── variables.tf    
+    │   ├── provider.tf      
+    │   └── outputs.tf 
+    ├── MyApp-Staging               
+    │   ├── resources.tf    
+    │   ├── variables.tf    
+    │   ├── provider.tf      
+    │   └── outputs.tf 
+    ├── MyApp-Prod               
+    │   ├── resources.tf    
+    │   ├── variables.tf    
+    │   ├── provider.tf      
+    │   └── outputs.tf      
+    └── ...
 
 
+To edit the files, load them in an editor, and open the `resources.tf` or `variables.tf` , and change the input values for each environment.
+Once you save all three sets of files, you can store them on your disk or in a Github repository under different directories.
+
+Now you can create these 3 environments using IBM Cloud Schematics. You will run a series of commands from Schematics 3 times, all from the CLI.
+
+### Create Environments Commands:
+
+- Create a schematics workspace 
+
+```
+ibmcloud schematics workspace new --file myapp-prod.json --state STATE_FILE_PATH
+
+myapp-prod.json:
+{
+  "name": "cde",
+  "shared_data": {
+    "region": "us-south"
+  },
+  "type": [
+    "terraform_v0.13"
+  ],
+  "description": "terraform workspace",
+  "tags": [
+    "department:HR",
+    "application:compensation",
+    ";"
+  ]
+    }
+  ]
+}
+```
+
+- Create archive file (.tar) 
+
+`tar -cf myapp-prod.tar terraform.tfstate resources.tf ...`
+
+- Upload archive file (.tar) to your Schematics workspace
+
+`ibmcloud schematics workspace upload  --id WORKSPACE_ID --file myapp-prod.tar --template TEMPLATE_ID`
+
+- Provision infrastructure
+
+`ibmcloud schematics apply --id WORKSPACE_ID --var-file vars.tfvars`
+
+Run the above commands three times on all environment folders(MyApp-Dev, MyApp-Staging, and MyApp-Prod).
+
+Now that you’ve executed these commands, and created these environments, let’s look at them and use them.
+
+### View environments Commands
+
+- List the IBM Cloud resources provisioned in schematics workspace.
+
+`ibmcloud schematics state list --id WORKSPACE_ID`
+
+As you can see, now you have 3 sets of resources for your application MyApp - one for Dev, one for Staging, and one for Prod.
+You can now deploy your application on each one, do your development, staging, and production work, confident that you have an identical environment as you originally set up and had working.
+
+## Conclusion
+
+So that is the process to reverse-engineer your existing cloud environment and re-deploy it as needed.
+
+The steps are:
+
+- Use this Configuration Discovery tool to reproduce a manually created cloud environment by capturing the Terraform “Infrastructure to Code” files
+- Modify the files to create 3 different environments: Dev, Staging, Prod.
+- Use the to re-create those resources using IBM Cloud Schematics, and then to check they were created the same way as you originally had set up
+
+
+You now have the ability to take your own manually created environments, capture them to re-usable Terraform code files, and then re-create in the IBM Cloud for future use.
 
 ## Future enhancements
 
 - Import will support a new flag `--merge`. This can be used to import the resources and merge with existing terraform statefile and configuration. 
-- Configure will support ensuring the dependencies terraform and terraformer exist. 
+- Rewrite terraform resource into terraform modules.
