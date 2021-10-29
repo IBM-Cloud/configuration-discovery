@@ -47,6 +47,11 @@ Below commands help you to import your resources into terraform configuration. F
 
 You are now ready to use the [Configuration Discovery tool](cmd/discovery/tutorial.md) tutorial.
 
+## Capabilities
+
+- Green-field import scenario
+- Upgrading the Terraform state file to the latest Terraform versions
+
 ## Steps to use the Configuration Discovery
 ### Files
 

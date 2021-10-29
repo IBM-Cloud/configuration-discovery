@@ -1,20 +1,24 @@
 # IBM Cloud Configuration Discovery
 
-Let's take a scenario that you have an infrastructure containing multiple services provisioned on IBM Cloud. One of your business requirement is to migrate existing infrastructure setup to declarative approach using Terraform. Since you have basic skill of Terraform, thinking more about challenges and workaround to create an entire infrastructure to Terraform. 
+Let's take a scenario that you have an infrastructure containing multiple services provisioned on IBM Cloud. One of your business requirement is to migrate existing infrastructure setup to declarative approach using Terraform. Since you have basic skill of Terraform, thinking more about challenges and workaround to create an entire infrastructure to Terraform.
+
 You need not think about, here is a tutorial that walks your through the [Configuration Discovery](https://test.cloud.ibm.com/docs/ibm-cloud-provider-for-terraform?topic=ibm-cloud-provider-for-terraform-terraformer-intro) to simplify your requirement.
 For more information, about getting started with the tool, see [blog](https://ibm.box.com/s/0ou4erd2t65ndiv1v83egfjgle699pcy).
 
 ## Table of Contents
 
-- Prerequisites
-- Installation and Setup
-- Usage
-- Validating and Re-creating the Environment
+- [Prerequisites](#prerequisities)
+- [Installation](#installation)
+- [Setup your Environment](#setup-your-environment)
+- [Usage](#usage)
+- [Validating and Re-creating the Environment](#validating-and-re-creating-the-environment)
+- [Conclusion](#conclusion)
+- [Future Enhancements](#future-enhancements)
 
 ## Prerequisites
 
 In your local system, following prerequisites must be met to install the Configuration Discovery plugin.
-- [Terraform](https://test.cloud.ibm.com/docs/ibm-cloud-provider-for-terraform?topic=ibm-cloud-provider-for-terraform-getting-started#tf_installation)
+- [Terraform installation](https://test.cloud.ibm.com/docs/ibm-cloud-provider-for-terraform?topic=ibm-cloud-provider-for-terraform-getting-started#tf_installation)
 
 ## Installation
 
@@ -43,21 +47,26 @@ Install by using the precompiled binary files manually by following the given st
   ```
   mv discovery <$GOPATH/bin or any other directory in path>
   ```
-- Or, If you have `GO` lang installed, run this command.
+
+    Or, If you have `GO` lang installed, run this command.
 
     ```
     go install github.com/IBM-Cloud/configuration-discovery/cmd/discovery
     ```
-### Setup your environment
+## Setup your Environment
 
 - Export the required `env vars` 
     * IC_API_KEY: Provide your IBM Cloud API key. This imports resources that your account has access.
 
-        `export IC_API_KEY=<IC_API_KEY>`
+        ```
+        export IC_API_KEY=<IC_API_KEY>
+        ```
 
     * DISCOVERY_CONFIG_DIR: The directory, where you want to generate and import the Terraform code. Configuration Discovery uses only this directory for all the read or write operations.
 
-         `export DISCOVERY_CONFIG_DIR=<PATH>`
+         ```
+         export DISCOVERY_CONFIG_DIR=<PATH>
+         ```
 
 ## Usage
 
@@ -85,9 +94,9 @@ Install by using the precompiled binary files manually by following the given st
         --version, -v  print the version
 ```
 
-### version
+### `version`
 
-- This will show the version of the discovery binary and all the services and resources that can be imported. Here is the list of services and the supported resources.
+Version lists the discovery binary and all the services and resources that can be imported. Here is the list of services and the supported resources.
 
     ````
         $ discovery version
@@ -179,56 +188,69 @@ Install by using the precompiled binary files manually by following the given st
                                     ibm_satellite_host                           
     ```
 
-### import
+### `import`
 
-"import" command will read the existing infrastructure and export the terraform files.
+Import command reads an existing infrastructure and export into Terraform files.
+
+**Example 1**
+
+To import resources from IBM VPC service
+
+```
+discovery import --services ibm_is_vpc
+```
+
+Here is an example that shows how to export Terraform files from an existing infrastructure for the IBM Cloud VPC resources in my account. 
+
+![image](images/vpc.png)
+
+**Example 2**
+
+To import resources from multiple services
+
+```
+discovery import --services ibm_is_vpc,ibm_cos
+```
+
+Here is an example that exports Terraform files from an existing infrastructure for both `IBM Cloud VPC` and `IBM Cloud Cloud Object Storage` resources in my account.
+
+![image](images/vpc_cos.png)
+
+### `compact`
+
+Compact parameter groups multiple resource files into one `resources.tf` file. 
 
 **Example**
 
-- To import resources from IBM VPC service
+```
+discovery import --services ibm_is_vpc,ibm_cos --compact
+```
 
-    `discovery import --services ibm_is_vpc`
+Here is an example to show how `ibm_is_vpc` and `ibm_cos` resources imports in my account and group all the service resources into a single Terraform configuration file.
 
-    This will export terraform files from existing infrastructure for the IBM VPC resources in my account. 
+![image](images/compact.png)
 
-    ![image](images/vpc.png)
+### `tags`
 
-- To import resources from multiple services
+Tags parameter is used to filter resources by its region or resource group.
 
-    `discovery import --services ibm_is_vpc,ibm_cos`
+**Example**
 
-    This will export terraform files from existing infrastructure for both IBM VPC & IBM COS resources in my account.
+```
+discovery import --services ibm_is_vpc,ibm_cos --tags 'region:us-east,resource_group:default'
+```
 
-    ![image](images/vpc_cos.png)
+### `config_name`
 
-### compact
+By default discovery will export the Terraform files into directory with the name **discovery<RANDOM_STRING>**. Passing **--config_name <FOLDER_NAME>** parameter will make discovery to expoprt the Terraform files to the specified directory.
 
--   "compact" parameter will group multiple resource files into one resources.tf file.
-
-    `discovery import --services ibm_is_vpc,ibm_cos --compact`
-
-    For example, this imported the resources ibm_is_vpc and ibm_cos in my account and group all the service resources into a single terraform configuration file.
-
-    ![image](images/compact.png)
-
-### tags
-
--   "tags" parameter is used to filter resources by its region or resource group.
-
-    **Example**
-
-    `discovery import --services ibm_is_vpc,ibm_cos --tags 'region:us-east,resource_group:default'`
-
-### config_name
-
--   By default discovery will export the terraform files in to directory with name "discovery<RANDOM_STRING>".Passing "--config_name <FOLDER_NAME>" parameter will make discovery to expoprt the terraform files to specified directory.
-
-    **Example** 
+**Example** 
     
-    This will export the terraform files into 'vpcconfig' directory.
+This command will export the Terraform files into 'vpcconfig' directory.
 
-    `discovery import --services ibm_is_vpc --config_name vpcconfig`
-
+```
+discovery import --services ibm_is_vpc --config_name vpcconfig
+```
 
 ## Validating and Re-creating the Environment
 
@@ -236,17 +258,17 @@ Now that we’ve captured the environment into Terraform files using the Configu
 
 ### Scenario
 
-You’ve manually created an IBM Kubernetes Service and a VPC on the IBM Cloud, you’ve deployed your application, and it’s working perfectly. Now, you want to put that into production just as you have it, using Infrastructure as Code, so you’ve run the Configuration Discovery tool, and captured that environment to Terraform files. These are the files you’ve captured
+The manually created and deployed an IBM Kubernetes Service and a VPC on the IBM Cloud is working perfectly. Now, you want to import your existing infrastructure into production just as you have it by using Infrastructure as Code. To achieve this requirement, you are asked to use the Configuration Discovery tool, and capture the existing environment into Terraform files. Here are the list of files you need to capture.
 
-```
-resources.tf -  Provides the configuration
-terraform.tfstate  -  Holds the last-known state of the infrastructure
-variables.tf  -  Contain values for the declared variables
-provider.tf   - Define which providers require for terraform to install and use
-outputs.tf - Allow you to export structured data about your infrastructure
-```
+- `resources.tf`: Provides the configuration
+- `terraform.tfstate`:  Holds the last-known state of the infrastructure
+- `variables.tf`:  Contains the value for the declared variables
+- `provider.tf`: Defines which provider is need to install Terraform and use
+- `outputs.tf`: Allows you to export structured data of your infrastructure
 
-These represent the environment you saved and want to duplicated. In this case, you are ready to go to full production, so you want to create 3 environments: Dev, Staging, and Prod. To create three different environments, you’ll need to take those files and duplicate them, one set for each environment type, and edit the files and inject new input values that are unique to each environment. 
+These files represent the environment you have in exisiting cloud environment and want to be duplicated. Now, you have the Terraform files and wanted to create three environments such as `Dev`, `Stage`, and `Prod`. You need replicate these Terraform files three times in a different folder, as one set for each environment type. Then edit the files and inject new input values that are unique to each environment. 
+
+**Sample environment structure**
 
     .
     ├── ...
@@ -268,51 +290,38 @@ These represent the environment you saved and want to duplicated. In this case, 
     │   └── outputs.tf      
     └── ...
 
+**Edit the files**
+You need to load the files in an editor, open the `resources.tf` or `variables.tf` file and edit the input values for each environment. And save all three sets of files, you can store them on your disk or in a different directories of your GitHub repository.
 
-To edit the files, load them in an editor, and open the `resources.tf` or `variables.tf` , and change the input values for each environment.
-Once you save all three sets of files, you can store them on your disk or in a Github repository under different directories.
-
-Now you can create these 3 environments using Terraform.
 
 ### Create environment commands:
 
-- Initialize directory containing Terraform configuration files
+- Initialize directory containing Terraform configuration files by executing `terraform init` command.
 
-    `terraform init`
+- Provision the infrastructure by executing `terraform apply` command.
 
-- Provision infrastructure
-
-    `terraform apply`
-
-Makes the changes in the infrastructure as defined in the congigration file. 
-
-Run the above commands three times on all environment folders(MyApp-Dev, MyApp-Staging, and MyApp-Prod).
-Now that you’ve executed these commands, and created these environments, let’s look at them and use them.
+Run the above commands three times on all environment folders such as `MyApp-Dev`, `MyApp-Staging`, and `MyApp-Prod`. Now that you have executed apply commands, and created these environments. Let’s see how to use them.
 
 ### View environment commands
 
-- List the IBM Cloud resources provisioned
+- List the IBM Cloud provisioned resource by executing `terraform show` command. 
 
-    `terraform show`
-
-As you can see, now you have 3 sets of resources for your application MyApp - one for Dev, one for Staging, and one for Prod.
-You can now deploy your application on each one, do your development, staging, and production work, confident that you have an identical environment as you originally set up and had working.
+As you can see, now you have 3 sets of resources for your application MyApp - one for Dev, one for Staging, and one for Prod. You can now deploy your application on development, staging, and production environment. Be confident to view an identical environment as that of you old setup in IBM Cloud.
 
 ## Conclusion
 
-So that is the process to reverse-engineer your existing cloud environment and re-deploy it as needed.
+This is the process to reverse engineer your existing IBM Cloud environment and re-deploy the environment as you need.
 
 The steps are:
 
-- Use this Configuration Discovery tool to reproduce a manually created cloud environment by capturing the Terraform “Infrastructure to Code” files
-- Modify the files to create 3 different environments: Dev, Staging, Prod.
-- Use the to re-create those resources using terraform, and then to check they were created the same way as you originally had set up
+- Use the Configuration Discovery tool to reproduce a manually created cloud environment by capturing the Terraform “Infrastructure to Code” files
+- Modify the files to create 3 different environments: Dev, Staging, Prod
+- Re-create the resources using Terraform, and then to check they were created as per your setup
 
-
-You now have the ability to take your own manually created environments, capture them to re-usable Terraform code files, and then re-create in the IBM Cloud for future use.
+Now, you have the ability to take any manually created environments, capture them to re-usable Terraform code files, and re-create in the IBM Cloud for future use.
 
 ## Future Enhancements
 
-- Import will support a new flag `--merge`. This can be used to import the resources and merge with existing terraform statefile and configuration. 
-- Rewrite terraform resource into terraform modules.
+- Import will support a new flag `--merge`. This can be used to import the resources and merge with existing Terraform state file and configuration. 
+- Rewrite Terraform resource into Terraform modules.
 - Supports integration of the Configuration Discovery tool into the [VS Code extension for IBM Cloud Schematics](https://www.ibm.com/cloud/blog/announcements/introducing-the-visual-studio-code-extension-for-ibm-cloud-schematics)
