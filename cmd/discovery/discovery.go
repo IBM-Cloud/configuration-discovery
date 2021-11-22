@@ -7,21 +7,26 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/IBM-Cloud/configuration-discovery/discovery"
+	"github.com/IBM-Cloud/configuration-discovery/tfplugin"
 	"github.com/IBM-Cloud/configuration-discovery/utils"
 	"github.com/IBM-Cloud/ibm-cloud-cli-sdk/bluemix/terminal"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/urfave/cli"
 )
 
 const (
-	releasesLink = "https://github.com/IBM-Cloud/configuration-discovery/releases"
+	releasesLink = "https://github.com/anilkumarnagaraj/terraform-provider-ibm-api/releases"
 )
 
 var (
-	ui      terminal.UI
-	confDir string
-	goctx   context.Context
+	ui          terminal.UI
+	planTimeOut = 60 * time.Minute
+	confDir     string
+	goctx       context.Context
 )
 
 func init() {
@@ -189,6 +194,7 @@ func main() {
 				" [--tags TAGS]",
 				" [--config_name CONFIG_NAME]",
 				" [--compact]",
+				" [--merge]",
 			),
 			Description: "Import TF config for resources in your ibm cloud account. " +
 				"Import all the resources for this service. Imports config and statefile. " +
@@ -202,7 +208,9 @@ func main() {
 				cli.StringFlag{
 					Name: "config_name",
 					Usage: "Folder inside config_dir, where to import the config. " +
-						"A folder with prefix discovery is created inside the config_dir, if not given. ",
+						"A folder with prefix discovery is created inside the config_dir, if not given. " +
+						"If this folder has some tf config already, merge flag has to be given. Imported" +
+						"tf config will be merge to existing config then.",
 					Value: "",
 				},
 				cli.StringFlag{
@@ -213,6 +221,10 @@ func main() {
 					Name: "compact",
 					Usage: "Use --compact to generate all the terraform code into one single file. " +
 						"If not passed, a file is created for each resource",
+				},
+				cli.BoolFlag{
+					Name:  "merge",
+					Usage: "Use --merge to import and merge with config/statefile in folder config_name ",
 				},
 			},
 
@@ -226,6 +238,7 @@ func main() {
 				services := c.String("services")
 				configName := c.String("config_name")
 				isCompact := c.Bool("compact")
+				isBrownField := c.Bool("merge")
 				tags := c.String("tags")
 
 				ui.Say("config_directory is %s", confDir)
@@ -250,6 +263,15 @@ func main() {
 						ui.Failed("Couldn't create %s, error: %v", err)
 						return err
 					}
+				} else {
+					isEmpty, err := utils.IsFolderEmpty(discoveryDir)
+					if err != nil {
+						ui.Warn("Couldn't open dir %s, err: %v", discoveryDir, err)
+					}
+					if !isEmpty && !isBrownField {
+						ui.Failed("Folder %s should be empty", discoveryDir)
+						return fmt.Errorf("config_name folder should be empty")
+					}
 				}
 
 				// todo: @srikar - where is opts used
@@ -269,7 +291,7 @@ func main() {
 							if len(tag) == 2 {
 								opts = append(opts, fmt.Sprintf("--%s=%s",
 									strings.TrimSpace(strings.ToLower(tag[0])), tag[1]))
-								tagsChanged += fmt.Sprintf("--%s=%s ",
+								tagsChanged += fmt.Sprintf("--%s=%s",
 									strings.TrimSpace(strings.ToLower(tag[0])), tag[1])
 							}
 						}
@@ -282,10 +304,88 @@ func main() {
 				}
 
 				ui.Say("Importing resources from ibm cloud")
-				err := discovery.DiscoveryImport(goctx, services, strings.TrimSpace(tagsChanged), isCompact, "", discoveryDir)
-				if err != nil {
-					ui.Failed("Error in Importing resources: %v", err)
-					return err
+				if !isBrownField {
+					err := discovery.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", discoveryDir)
+					if err != nil {
+						ui.Failed("Error in Importing resources: %v", err)
+						return err
+					}
+				} else {
+					if _, err := os.Stat("terraform.tfstate"); os.IsNotExist(err) {
+						ui.Failed("Terraform state file does not exist to merge.\n")
+						return err
+					}
+
+					//Clean up discovery directory
+					importDir := discoveryDir + "/" + "generated" + randomID
+					if _, err := os.Stat(importDir); os.IsNotExist(err) {
+						ui.Say("\ncreating Folder %s for generating config", importDir)
+						err = os.MkdirAll(importDir, os.ModePerm)
+						if err != nil {
+							ui.Failed("Couldn't create %s, error: %v", err)
+							return err
+						}
+					}
+
+					// Import the terraform resources & state files.
+					err := discovery.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", importDir)
+					if err != nil {
+						ui.Failed("Error with importing: %v", err)
+						return err
+					}
+
+					// generatedPath, _ := utils.Filepathjoin(discoveryDir, "generated", "ibm")
+					generatedPath := importDir
+					ui.Say("Imported resources from ibm cloud at " + generatedPath)
+					if _, err := os.Stat(generatedPath); os.IsNotExist(err) {
+						ui.Say("No configuration files!!!")
+						return nil
+					} else {
+						ui.Say("Import successful. Imported into %s\n", generatedPath)
+					}
+
+					//Merge state files and templates in services
+					// repoDir, _ := utils.Filepathjoin(confDir, repoName)
+					repoDir := discoveryDir
+					//Backup repo TF file.
+					terraformStateFile := confDir + utils.PathSep + "terraform.tfstate"
+					if _, err := os.Stat(terraformStateFile); os.IsNotExist(err) {
+						ui.Say("No merging needed bcz statefile doesn't already exist at %s\n",
+							terraformStateFile)
+						ui.Say("Done. Exiting")
+						ui.Ok()
+						return nil
+					}
+
+					err = utils.Copy(terraformStateFile, repoDir+utils.PathSep+"terraform.tfstate_backup")
+					if err != nil {
+						ui.Say("Error with copying file")
+						return err
+					}
+
+					//Read state file from local repo directory
+					terraformObj := discovery.ReadTerraformStateFile(goctx, terraformStateFile, "")
+					//Read state file from discovery repo directory
+					terraformerStateFile := importDir + utils.PathSep + "terraform.tfstate"
+					terraformerObj := discovery.ReadTerraformStateFile(goctx, terraformerStateFile, "discovery")
+
+					ui.Say("Comparing and merging statefiles local %s and remote %s\n",
+						terraformStateFile, terraformerStateFile)
+					// comparing state files
+					if cmp.Equal(terraformObj, terraformerObj,
+						cmpopts.IgnoreFields(tfplugin.Resource{}, "ResourceName")) {
+						ui.Say("# Config repo configuration/state is equal !!")
+					} else {
+						ui.Say("# Config repo configuration/state is not equal !!")
+						err = discovery.MergeStateFile(goctx, terraformObj, terraformerObj, terraformerStateFile,
+							terraformStateFile, repoDir, confDir, randomID, planTimeOut)
+						if err != nil {
+							ui.Warn("# Couldn't merge state files", err)
+							return err
+						}
+					}
+
+					ui.Say("Backend action: file state here finally", terraformStateFile)
 				}
 
 				ui.Say("Successful import")

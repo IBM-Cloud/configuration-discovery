@@ -1,4 +1,4 @@
-package terraformwrapper
+package tfplugin
 
 import (
 	"bufio"
@@ -16,18 +16,6 @@ import (
 )
 
 var logDir string
-
-// HCL Config ..
-type Resource struct {
-	ID                  string
-	ResourceIndex       int
-	ResourceType        string
-	ResourceName        string
-	ResourceTypeAndName string
-	ResourceTypeAndID   string
-	DependsOn           []string               `json:",omitempty"`
-	Attributes          map[string]interface{} `json:",omitempty"`
-}
 
 // TerraformInit ...
 func TerraformInit(execDir string, timeout time.Duration, randomID string) error {
@@ -66,7 +54,6 @@ func TerraformShow(execDir, stateDir string, stateFileName string, timeout time.
 func TerraformerImport(configDir, resources, tags string, compact bool, timeout time.Duration, randomID string) error {
 
 	if compact {
-
 		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, "--compact", fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID)
 	} else {
 		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID)
@@ -83,12 +70,6 @@ func TerraformMoveResource(configDir, srcStateFile, destStateFile, resourceName 
 func TerraformReplaceProvider(configDir, randomID string, timeout time.Duration) error {
 	//terraform state
 	return run(context.Background(), "terraform", []string{"state", "replace-provider", "-auto-approve", "registry.terraform.io/-/ibm", "registry.terraform.io/ibm-cloud/ibm"}, configDir, timeout, randomID)
-}
-
-// TerraformVersion ...
-func TerraformVersion(execDir string, timeout time.Duration, randomID string) error {
-
-	return run(context.Background(), "terraform", []string{"verson"}, execDir, timeout, randomID)
 }
 
 // todo: @srikar - Make attribute function, remove too many func arguments
