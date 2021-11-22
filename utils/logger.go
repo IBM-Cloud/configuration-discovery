@@ -26,6 +26,7 @@ func GetLogger(ctx context.Context) terminal.UI {
 }
 
 type logMocker struct {
+	quiet  bool
 	In     io.Reader
 	Out    io.Writer
 	ErrOut io.Writer
@@ -46,6 +47,20 @@ func (l *logMocker) Say(format string, args ...interface{}) {
 	} else {
 		log.Print(format + "\n")
 	}
+}
+
+func (l *logMocker) Info(format string, args ...interface{}) {
+	l.Say(format, args)
+}
+
+func (l *logMocker) Verbose(format string, args ...interface{}) {
+	if !l.quiet {
+		l.Say(format, args)
+	}
+}
+
+func (l *logMocker) Print(format string, args ...interface{}) {
+	l.Say(format, args)
 }
 
 func (l *logMocker) Warn(format string, args ...interface{}) {
@@ -135,4 +150,12 @@ func (l *logMocker) Table(headers []string) terminal.Table {
 
 func (l *logMocker) Writer() io.Writer {
 	return l.Out
+}
+
+func (l *logMocker) SetQuiet(quiet bool) {
+	l.quiet = quiet
+}
+
+func (l *logMocker) Quiet() bool {
+	return l.quiet
 }
