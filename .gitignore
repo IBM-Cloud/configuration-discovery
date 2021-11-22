@@ -1,0 +1,13 @@
+# server executable
+configuration-discovery
+
+# Ignore all the vendored dependencies
+vendor/*
+
+# vs code for dev debugging
+.vscode/*
+
+
+# # binary 
+/discovery
+cmd/discovery/discovery
