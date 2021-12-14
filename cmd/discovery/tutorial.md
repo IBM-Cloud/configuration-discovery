@@ -2,7 +2,7 @@
 
 Let's take a scenario that you have an infrastructure containing multiple services provisioned on IBM Cloud. One of your business requirement is to migrate existing infrastructure setup to declarative approach using Terraform. Since you have basic skill of Terraform, thinking more about challenges and workaround to create an entire infrastructure to Terraform.
 
-You need not think about, here is a tutorial that walks your through the [Configuration Discovery](https://test.cloud.ibm.com/docs/ibm-cloud-provider-for-terraform?topic=ibm-cloud-provider-for-terraform-terraformer-intro) to simplify your requirement.
+You need not think about, here is a tutorial that walks your through the Configuration Discovery to simplify your requirement.
 For more information, about getting started with the tool, see [blog](https://www.ibm.com/cloud/blog/announcements/announcing-configuration-discovery-for-ibm-cloud).
 
 ## Table of Contents
