@@ -1,4 +1,4 @@
-package discovery
+package service
 
 import (
 	"fmt"
@@ -73,12 +73,12 @@ func (conf *Configuration) String() string {
 func init() {
 	config, err := NewConfiguration("API")
 	if err != nil {
-		log.Fatalln("Could not read configuration", err)
+		log.Fatalln("ERROR: Could not read configuration", err)
 	}
 
 	currentDir = config.Server.MountDir
 	if currentDir == "" {
-		panic("MOUNT_DIR is not set. Please set MOUNT_DIR to continue")
+		panic("ERROR: MOUNT_DIR is not set. Please set MOUNT_DIR to continue")
 	}
 
 	logDir = currentDir + utils.PathSep + "log"

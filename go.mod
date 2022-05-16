@@ -12,14 +12,18 @@ require (
 	github.com/hashicorp/go-plugin v1.4.2
 	github.com/hashicorp/go-version v1.3.0
 	github.com/hashicorp/hcl v1.0.0
+	github.com/hashicorp/hcl/v2 v2.3.0
+	github.com/hashicorp/hcl2 v0.0.0-20191002203319-fb75b3253c80
 	github.com/hashicorp/terraform v0.12.31
+	github.com/hashicorp/terraform-json v0.13.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/nicksnyder/go-i18n v1.10.1 // indirect
 	github.com/tidwall/sjson v1.1.7
 	github.com/urfave/cli v1.22.5
-	github.com/zclconf/go-cty v1.8.2
+	github.com/zclconf/go-cty v1.9.1
+	go.uber.org/zap v1.21.0
 	golang.org/x/crypto v0.0.0-20210817164053-32db794688a5 // indirect
 	gopkg.in/mgo.v2 v2.0.0-20190816093944-a6b53ec6cb22
-	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0
 )

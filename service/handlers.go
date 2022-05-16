@@ -1,4 +1,4 @@
-package discovery
+package service
 
 import (
 	"context"
@@ -221,7 +221,8 @@ func PlanHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 
 		go func() {
 			pullRepo(repoName)
-			err := tfplugin.TerraformPlan(confDir, planTimeOut, randomID)
+			planOutput := "out=state.txt"
+			err := tfplugin.TerraformPlan(confDir, planOutput, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -781,22 +782,22 @@ func TerraformerImportHandler(s *mgo.Session) func(w http.ResponseWriter, r *htt
 
 				//Read state file from local repo directory
 				terraformStateFile := repoDir + "/terraform.tfstate"
-				terraformObj := ReadTerraformStateFile(context.Background(), terraformStateFile, "")
+				terraformObj := ReadTerraformStateFile13(context.Background(), terraformStateFile, "")
 
 				//Read state file from discovery repo directory
 				terraformerSateFile := discoveryDir + "/terraform.tfstate"
-				terraformerObj := ReadTerraformStateFile(context.Background(), terraformerSateFile, "discovery")
+				terraformerObj := ReadTerraformStateFile13(context.Background(), terraformerSateFile, "discovery")
 
 				// comparing state files
 				if cmp.Equal(terraformObj, terraformerObj, cmpopts.IgnoreFields(tfplugin.Resource{}, "ResourceName")) {
 					log.Printf("# Config repo configuration/state is equal !!\n")
 				} else {
 					log.Printf("# Config repo configuration/state is not equal !!\n")
-					err = MergeStateFile(context.Background(), terraformObj, terraformerObj, terraformerSateFile, terraformStateFile, discoveryDir, repoDir, randomID, planTimeOut)
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
-						return
-					}
+					// err = MergeResources(context.Background(), terraformObj, terraformerObj, terraformerSateFile, terraformStateFile, discoveryDir, repoDir, randomID, planTimeOut)
+					// if err != nil {
+					// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+					// 	return
+					// }
 				}
 				statusResponse.Status = "Completed"
 				// Update the status in the db in case it is completed

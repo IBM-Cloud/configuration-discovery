@@ -38,12 +38,12 @@ func RemoveDir(path string) (err error) {
 	return
 }
 
-func CreateDir(dirName string) error {
-	err := os.Mkdir(dirName, 0777)
+func CreateDir(dirName string) (err error) {
+	err = os.Mkdir(dirName, 0755)
 	if err != nil {
 		return err
 	}
-	return nil
+	return
 }
 
 // Copy ..
@@ -117,4 +117,37 @@ func IsFileExists(name string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func isFolderExist(path string) bool {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	return true
+}
+
+func CreateBackupFolder(folderName string) (string, error) {
+	isExist := isFolderExist(folderName)
+	if !isExist {
+		err := os.Mkdir(folderName, 0755)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		parts := strings.Split(folderName, "_")
+		if len(parts) == 2 {
+			i := 1
+			backupFolder := fmt.Sprintf("%s_%d", folderName, i)
+			for isFolderExist(backupFolder) {
+				i += 1
+				backupFolder = fmt.Sprintf("%s_%d", folderName, i)
+			}
+			err := os.Mkdir(backupFolder, 0755)
+			if err != nil {
+				return "", err
+			}
+			return backupFolder, nil
+		}
+	}
+	return folderName, nil
 }

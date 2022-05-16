@@ -9,12 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBM-Cloud/configuration-discovery/discovery"
-	"github.com/IBM-Cloud/configuration-discovery/tfplugin"
+	"github.com/IBM-Cloud/configuration-discovery/service"
 	"github.com/IBM-Cloud/configuration-discovery/utils"
 	"github.com/IBM-Cloud/ibm-cloud-cli-sdk/bluemix/terminal"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/urfave/cli"
 )
 
@@ -134,7 +131,7 @@ func main() {
 
 					ui.Say("Will clone git repo", gitURL)
 
-					_, repoName, err = discovery.CloneRepo(discovery.ConfigRequest{
+					_, repoName, err = service.CloneRepo(service.ConfigRequest{
 						GitURL: gitURL,
 					})
 					if err != nil {
@@ -305,18 +302,21 @@ func main() {
 
 				ui.Say("Importing resources from ibm cloud")
 				if !isBrownField {
-					err := discovery.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", discoveryDir)
+					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", discoveryDir)
 					if err != nil {
 						ui.Failed("Error in Importing resources: %v", err)
 						return err
 					}
 				} else {
+					//Brown field scenario
 					if _, err := os.Stat("terraform.tfstate"); os.IsNotExist(err) {
-						ui.Failed("Terraform state file does not exist to merge.\n")
-						return err
+						ui.Say("No merging needed bcz terraform statefile doesn't already exist in local repo.")
+						ui.Say("Done. Exiting")
+						ui.Ok()
+						return nil
 					}
 
-					//Clean up discovery directory
+					//Create discovery directory
 					importDir := discoveryDir + "/" + "generated" + randomID
 					if _, err := os.Stat(importDir); os.IsNotExist(err) {
 						ui.Say("\ncreating Folder %s for generating config", importDir)
@@ -328,61 +328,52 @@ func main() {
 					}
 
 					// Import the terraform resources & state files.
-					err := discovery.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", importDir)
+					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", importDir)
 					if err != nil {
 						ui.Failed("Error with importing: %v", err)
 						return err
 					}
 
-					// generatedPath, _ := utils.Filepathjoin(discoveryDir, "generated", "ibm")
-					generatedPath := importDir
-					ui.Say("Imported resources from ibm cloud at " + generatedPath)
-					if _, err := os.Stat(generatedPath); os.IsNotExist(err) {
+					ui.Say("Imported resources from ibm cloud at " + importDir)
+					if _, err := os.Stat(importDir); os.IsNotExist(err) {
 						ui.Say("No configuration files!!!")
 						return nil
 					} else {
-						ui.Say("Import successful. Imported into %s\n", generatedPath)
+						ui.Say("Import successful. Imported into %s\n", importDir)
 					}
 
-					//Merge state files and templates in services
-					// repoDir, _ := utils.Filepathjoin(confDir, repoName)
-					repoDir := discoveryDir
-					//Backup repo TF file.
-					terraformStateFile := confDir + utils.PathSep + "terraform.tfstate"
-					if _, err := os.Stat(terraformStateFile); os.IsNotExist(err) {
-						ui.Say("No merging needed bcz statefile doesn't already exist at %s\n",
-							terraformStateFile)
-						ui.Say("Done. Exiting")
-						ui.Ok()
-						return nil
-					}
-
-					err = utils.Copy(terraformStateFile, repoDir+utils.PathSep+"terraform.tfstate_backup")
-					if err != nil {
-						ui.Say("Error with copying file")
+					serviceList := strings.Split(services, ",")
+					if len(serviceList) == 0 {
+						ui.Failed("ERROR: " + err.Error())
 						return err
 					}
 
-					//Read state file from local repo directory
-					terraformObj := discovery.ReadTerraformStateFile(goctx, terraformStateFile, "")
-					//Read state file from discovery repo directory
+					//Compare & merge local & remote .tf/state file
+					terraformStateFile := confDir + utils.PathSep + "terraform.tfstate"
 					terraformerStateFile := importDir + utils.PathSep + "terraform.tfstate"
-					terraformerObj := discovery.ReadTerraformStateFile(goctx, terraformerStateFile, "discovery")
-
-					ui.Say("Comparing and merging statefiles local %s and remote %s\n",
+					ui.Say("# Comparing and merging statefiles local %s and remote %s\n",
 						terraformStateFile, terraformerStateFile)
-					// comparing state files
-					if cmp.Equal(terraformObj, terraformerObj,
-						cmpopts.IgnoreFields(tfplugin.Resource{}, "ResourceName")) {
-						ui.Say("# Config repo configuration/state is equal !!")
-					} else {
-						ui.Say("# Config repo configuration/state is not equal !!")
-						err = discovery.MergeStateFile(goctx, terraformObj, terraformerObj, terraformerStateFile,
-							terraformStateFile, repoDir, confDir, randomID, planTimeOut)
-						if err != nil {
-							ui.Warn("# Couldn't merge state files", err)
-							return err
-						}
+
+					//Delete drift resources from local .tf/state file
+					err = service.DeleteDriftResources(goctx, serviceList, confDir, randomID, planTimeOut)
+					if err != nil {
+						ui.Warn("# Couldn't delete resource from .tf/state files", err)
+						return err
+					}
+
+					//Merge resources from remote to local .tf/state file
+					err = service.MergeResources(goctx, terraformerStateFile, terraformStateFile,
+						discoveryDir, confDir, randomID, planTimeOut)
+					if err != nil {
+						ui.Warn("# Couldn't merge .tf/state files", err)
+						return err
+					}
+
+					//Cleanup the discovery generated files
+					err = service.CleanUpDiscoveryFiles(confDir, discoveryDir)
+					if err != nil {
+						ui.Warn("# Couldn't delete discovery generated folder.", err)
+						return err
 					}
 
 					ui.Say("Backend action: file state here finally", terraformStateFile)

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBM-Cloud/configuration-discovery/discovery"
+	"github.com/IBM-Cloud/configuration-discovery/service"
 	"github.com/fvbock/endless"
 	"github.com/gorilla/mux"
 	mgo "gopkg.in/mgo.v2"
@@ -64,7 +64,7 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	config := discovery.GetConfiguration()
+	config := service.GetConfiguration()
 
 	//session, err := mgo.Dial(fmt.Sprintf("%s:%s@%s:%d", config.Mongo.UserName, config.Mongo.Password, config.Mongo.Host, config.Mongo.Port))
 	session, err := mgo.Dial("localhost")
@@ -95,37 +95,37 @@ func main() {
 		r.HandleFunc("/"+apiKey, APIDescriptionHandler)
 	}
 
-	r.HandleFunc("/v1/configuration", discovery.ConfHandler(session)).Methods("POST")
+	r.HandleFunc("/v1/configuration", service.ConfHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v1/configuration/{repo_name}", discovery.ConfDeleteHandler).Methods("DELETE")
+	r.HandleFunc("/v1/configuration/{repo_name}", service.ConfDeleteHandler).Methods("DELETE")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/plan", discovery.PlanHandler(session)).Methods("POST")
+	r.HandleFunc("/v1/configuration/{repo_name}/plan", service.PlanHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/show", discovery.ShowHandler(session)).Methods("POST")
+	r.HandleFunc("/v1/configuration/{repo_name}/show", service.ShowHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/apply", discovery.ApplyHandler(session)).Methods("POST")
+	r.HandleFunc("/v1/configuration/{repo_name}/apply", service.ApplyHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/destroy", discovery.DestroyHandler(session)).Methods("POST")
+	r.HandleFunc("/v1/configuration/{repo_name}/destroy", service.DestroyHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{actionID}/log", discovery.LogHandler).Methods("GET")
+	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{actionID}/log", service.LogHandler).Methods("GET")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{actionID}/status", discovery.StatusHandler(session)).Methods("GET")
+	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{actionID}/status", service.StatusHandler(session)).Methods("GET")
 
-	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{log_file}", discovery.ViewLogHandler)
+	r.HandleFunc("/v1/configuration/{repo_name}/{action}/{log_file}", service.ViewLogHandler)
 
-	r.HandleFunc("/v1/configuration/{repo_name}/{action}", discovery.GetActionDetailsHandler(session)).Methods("GET")
+	r.HandleFunc("/v1/configuration/{repo_name}/{action}", service.GetActionDetailsHandler(session)).Methods("GET")
 
-	r.HandleFunc("/v2/configuration", discovery.ConfHandler(session)).Methods("POST")
+	r.HandleFunc("/v2/configuration", service.ConfHandler(session)).Methods("POST")
 
-	r.HandleFunc("/v2/configuration/{repo_name}/import", discovery.TerraformerImportHandler(session)).Methods("GET")
+	r.HandleFunc("/v2/configuration/{repo_name}/import", service.TerraformerImportHandler(session)).Methods("GET")
 
-	r.HandleFunc("/v2/configuration/{repo_name}/{action}/{actionID}/log", discovery.LogHandler).Methods("GET")
+	r.HandleFunc("/v2/configuration/{repo_name}/{action}/{actionID}/log", service.LogHandler).Methods("GET")
 
-	r.HandleFunc("/v2/configuration/{repo_name}/{action}/{actionID}/status", discovery.StatusHandler(session)).Methods("GET")
+	r.HandleFunc("/v2/configuration/{repo_name}/{action}/{actionID}/status", service.StatusHandler(session)).Methods("GET")
 
-	r.HandleFunc("/v2/configuration/{repo_name}/statefile", discovery.TerraformerStateHandler(session)).Methods("GET")
+	r.HandleFunc("/v2/configuration/{repo_name}/statefile", service.TerraformerStateHandler(session)).Methods("GET")
 
-	r.HandleFunc("/v2/configuration/{repo_name}/statefile", discovery.TerraformerStateHandler(session)).Methods("POST")
+	r.HandleFunc("/v2/configuration/{repo_name}/statefile", service.TerraformerStateHandler(session)).Methods("POST")
 
 	log.Println("Server will listen at port", config.Server.HTTPAddr, config.Server.HTTPPort)
 	muxWithMiddlewares := http.TimeoutHandler(r, time.Second*60, "Timeout!")

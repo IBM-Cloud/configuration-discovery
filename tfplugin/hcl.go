@@ -26,16 +26,16 @@ type astSanitizer struct{}
 
 // HCL Config ..
 type Resource struct {
-	ID                  string
-	ResourceIndex       int
-	ResourceType        string
-	ResourceName        string
-	ResourceTypeAndName string
-	ResourceTypeAndID   string
-	DependsOn           []string `json:",omitempty"`
-	Provider            string
-	Attributes          map[string]interface{}            `json:",omitempty"`
-	Outputs             map[string]*terraform.OutputState `json:",omitempty"`
+	ID          string
+	Index       int
+	Type        string
+	Name        string
+	TypeAndName string
+	TypeAndID   string
+	DependsOn   []string `json:",omitempty"`
+	Provider    string
+	Attributes  map[string]interface{}            `json:",omitempty"`
+	Outputs     map[string]*terraform.OutputState `json:",omitempty"`
 }
 
 // output prints creates b printable HCL output and returns it.
@@ -140,21 +140,21 @@ func HclPrintResource(resources []Resource, providerData map[string]interface{},
 	mapsObjects := map[string]struct{}{}
 	indexRe := regexp.MustCompile(`\.[0-9]+`)
 	for _, res := range resources {
-		r := resourcesByType[res.ResourceType]
+		r := resourcesByType[res.Type]
 		if r == nil {
 			r = make(map[string]interface{})
-			resourcesByType[res.ResourceType] = r
+			resourcesByType[res.Type] = r
 		}
 
-		if r[res.ResourceName] != nil {
-			log.Printf("[ERR]: duplicate resource found: %s.%s", res.ResourceType, res.ResourceName)
+		if r[res.Name] != nil {
+			log.Printf("[ERR]: duplicate resource found: %s.%s", res.Type, res.Name)
 			continue
 		}
 
 		if len(res.DependsOn) > 0 {
 			res.Attributes["depends_on"] = res.DependsOn
 		}
-		r[res.ResourceName] = res.Attributes
+		r[res.Name] = res.Attributes
 
 		for k := range res.Attributes {
 			if strings.HasSuffix(k, ".%") {
