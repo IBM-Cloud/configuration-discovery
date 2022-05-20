@@ -244,31 +244,38 @@ func main() {
 					ui.Warn("IC_API_KEY not exported")
 				}
 
-				b := make([]byte, 10)
+				b := make([]byte, 10) // todo: @srikar - decrease the lenghth
 				rand.Read(b)
 				randomID := fmt.Sprintf("%x", b) // todo: @srikar - change to time based
+				var localTFDir string
 
 				if configName == "" {
-					configName = "discovery" + randomID
+					if !isBrownField {
+						configName = "discovery" + randomID
+					}
 				}
 
-				discoveryDir, _ := utils.Filepathjoin(confDir, configName)
-				if _, err := os.Stat(discoveryDir); os.IsNotExist(err) {
-					ui.Say("\ncreating Folder %s for generating config", discoveryDir)
-					err = os.MkdirAll(discoveryDir, os.ModePerm)
-					if err != nil {
-						ui.Failed("Couldn't create %s, error: %v", err)
-						return err
+				greenFieldImportDir, _ := utils.Filepathjoin(confDir, configName)
+				if !isBrownField {
+					if _, err := os.Stat(greenFieldImportDir); os.IsNotExist(err) {
+						ui.Say("\ncreating Folder %s for generating config", greenFieldImportDir)
+						err = os.MkdirAll(greenFieldImportDir, os.ModePerm)
+						if err != nil {
+							ui.Failed("Couldn't create %s, error: %v", err)
+							return err
+						}
+					} else {
+						isEmpty, err := utils.IsFolderEmpty(greenFieldImportDir)
+						if err != nil {
+							ui.Warn("Couldn't open dir %s, err: %v", greenFieldImportDir, err)
+						}
+						if !isEmpty && !isBrownField {
+							ui.Failed("Folder %s should be empty", greenFieldImportDir)
+							return fmt.Errorf("config_name folder should be empty or pass --merge option to merge with existing config")
+						}
 					}
 				} else {
-					isEmpty, err := utils.IsFolderEmpty(discoveryDir)
-					if err != nil {
-						ui.Warn("Couldn't open dir %s, err: %v", discoveryDir, err)
-					}
-					if !isEmpty && !isBrownField {
-						ui.Failed("Folder %s should be empty", discoveryDir)
-						return fmt.Errorf("config_name folder should be empty")
-					}
+					localTFDir = greenFieldImportDir
 				}
 
 				// todo: @srikar - where is opts used
@@ -302,29 +309,40 @@ func main() {
 
 				ui.Say("Importing resources from ibm cloud")
 				if !isBrownField {
-					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", discoveryDir)
+					ui.Say("folder is greenFieldImportDir", greenFieldImportDir)
+					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", greenFieldImportDir)
 					if err != nil {
 						ui.Failed("Error in Importing resources: %v", err)
 						return err
 					}
 				} else {
+					ui.Say("folder is localTFDir", localTFDir)
 					//Brown field scenario
-					if _, err := os.Stat("terraform.tfstate"); os.IsNotExist(err) {
-						ui.Say("No merging needed bcz terraform statefile doesn't already exist in local repo.")
+					// todo:  - don't we support merging just the tf files
+					if _, err := os.Stat(localTFDir + utils.PathSep + "terraform.tfstate"); os.IsNotExist(err) {
+						ui.Say("No merging needed bcz terraform statefile doesn't already exist in local repo.", localTFDir)
 						ui.Say("Done. Exiting")
 						ui.Ok()
 						return nil
 					}
 
 					//Create discovery directory
-					importDir := discoveryDir + "/" + "generated" + randomID
-					if _, err := os.Stat(importDir); os.IsNotExist(err) {
+					importDir := localTFDir + utils.PathSep + "generated" + randomID
+					if _, err := os.Stat(importDir); os.IsNotExist(err) { // todo: @srikar - always true
 						ui.Say("\ncreating Folder %s for generating config", importDir)
 						err = os.MkdirAll(importDir, os.ModePerm)
 						if err != nil {
 							ui.Failed("Couldn't create %s, error: %v", err)
 							return err
 						}
+					} else {
+						// change the randomid and try again or fail  // todo: @srikar -
+					}
+
+					serviceList := strings.Split(services, ",")
+					if len(serviceList) == 0 {
+						ui.Failed("No services were given") // todo: @srikar - what is this error @anil
+						return fmt.Errorf("no services were given")
 					}
 
 					// Import the terraform resources & state files.
@@ -335,27 +353,30 @@ func main() {
 					}
 
 					ui.Say("Imported resources from ibm cloud at " + importDir)
-					if _, err := os.Stat(importDir); os.IsNotExist(err) {
-						ui.Say("No configuration files!!!")
-						return nil
+					// if _, err := os.Stat(importDir); os.IsNotExist(err) {  // todo: @srikar - check with Anil
+					if isEmpty, err := utils.IsFolderEmpty(importDir); err != nil && isEmpty {
+						ui.Say("No configuration files after importing!!!")
+						// todo: @srikar - exit here
 					} else {
 						ui.Say("Import successful. Imported into %s\n", importDir)
 					}
 
-					serviceList := strings.Split(services, ",")
-					if len(serviceList) == 0 {
-						ui.Failed("ERROR: " + err.Error())
-						return err
-					}
-
 					//Compare & merge local & remote .tf/state file
-					terraformStateFile := confDir + utils.PathSep + "terraform.tfstate"
+					terraformStateFile := localTFDir + utils.PathSep + "terraform.tfstate"
 					terraformerStateFile := importDir + utils.PathSep + "terraform.tfstate"
 					ui.Say("# Comparing and merging statefiles local %s and remote %s\n",
 						terraformStateFile, terraformerStateFile)
 
+					defer func() {
+						//Cleanup the discovery generated files
+						err = service.CleanUpDiscoveryFiles(localTFDir, importDir)
+						if err != nil {
+							ui.Warn("# there was a problem in cleaning up.", err)
+						}
+					}()
+
 					//Delete drift resources from local .tf/state file
-					err = service.DeleteDriftResources(goctx, serviceList, confDir, randomID, planTimeOut)
+					err = service.DeleteDriftResources(goctx, serviceList, localTFDir, randomID, planTimeOut)
 					if err != nil {
 						ui.Warn("# Couldn't delete resource from .tf/state files", err)
 						return err
@@ -363,16 +384,9 @@ func main() {
 
 					//Merge resources from remote to local .tf/state file
 					err = service.MergeResources(goctx, terraformerStateFile, terraformStateFile,
-						discoveryDir, confDir, randomID, planTimeOut)
+						importDir, localTFDir, randomID, planTimeOut)
 					if err != nil {
 						ui.Warn("# Couldn't merge .tf/state files", err)
-						return err
-					}
-
-					//Cleanup the discovery generated files
-					err = service.CleanUpDiscoveryFiles(confDir, discoveryDir)
-					if err != nil {
-						ui.Warn("# Couldn't delete discovery generated folder.", err)
 						return err
 					}
 
