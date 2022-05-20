@@ -21,12 +21,12 @@ import (
 )
 
 // Remove de-provisioned resources from local .tf/state files
-func DeleteDriftResources(ctx context.Context, services []string, confDir, randomID string, planTimeOut time.Duration) error {
+func DeleteDriftResources(ctx context.Context, services []string, localTFDir, randomID string, planTimeOut time.Duration) error {
 	logger := utils.GetLogger(ctx)
-	logger.Say("INFO: Remove the drift resources from .tf/state file from local repo.")
+	logger.Say("INFO: Remove the drift resources from .tfstate file from local repo.")
 
 	//Get drift resources
-	driftResourceList, err := getDriftResources(ctx, services, confDir, randomID)
+	driftResourceList, err := getDriftResources(ctx, services, localTFDir, randomID)
 	if err != nil {
 		logger.Failed("ERROR: %v.", err)
 		return err
@@ -48,8 +48,8 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 		}
 
 		//Take backup of terraform.tfstate file
-		srcFile := confDir + "/terraform.tfstate"
-		destFile := confDir + "/" + backupFolder + "/terraform.tfstate_bkp"
+		srcFile := localTFDir + utils.PathSep + "terraform.tfstate"
+		destFile := localTFDir + utils.PathSep + backupFolder + utils.PathSep + "terraform.tfstate_bkp"
 		err = utils.Copy(srcFile, destFile)
 		if err != nil {
 			logger.Failed("ERROR:  %v", err)
@@ -57,7 +57,7 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 		}
 
 		//Remove resources from .tf/state file
-		r, _ := regexp.Compile("^[A-Za-z-_]+\\.tf$")
+		r, _ := regexp.Compile(`^[A-Za-z-_]+\\.tf$`)
 		files, err := ioutil.ReadDir(".")
 		if err != nil {
 			logger.Failed("ERROR:  %v", err)
@@ -67,6 +67,10 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 		for _, file := range files {
 			if r.MatchString(file.Name()) {
 				info, err := os.Lstat(file.Name())
+				if err != nil {
+					logger.Failed("ERROR:  %v", err)
+					return err
+				}
 				b, err := ioutil.ReadFile(file.Name())
 				if err != nil {
 					logger.Failed("ERROR:  %v", err)
@@ -84,8 +88,8 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 							backupCount++
 							//Take Backup of .TF file.
 							if backupCount == 1 {
-								srcFile = confDir + "/" + file.Name()
-								destFile = confDir + "/" + backupFolder + "/" + file.Name() + "_bkp"
+								srcFile = localTFDir + utils.PathSep + file.Name()
+								destFile = localTFDir + utils.PathSep + backupFolder + utils.PathSep + file.Name() + "_bkp"
 								err = utils.Copy(srcFile, destFile)
 								if err != nil {
 									logger.Failed("ERROR:  %v", err)
@@ -96,7 +100,7 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 							//Remove resource block from .tf file
 							toBeWritten.Body().RemoveBlock(block)
 							//Remove resource from terraform.tfstate file
-							err = tfplugin.TerraformStateRemove(confDir, resTypeAndName, randomID, planTimeOut)
+							err = tfplugin.TerraformStateRemove(localTFDir, resTypeAndName, randomID, planTimeOut)
 							if err != nil {
 								logger.Say("INFO: Failed to remove resource '%v' from .tf file.", resTypeAndName)
 								return err
@@ -124,13 +128,13 @@ func DeleteDriftResources(ctx context.Context, services []string, confDir, rando
 }
 
 // getDriftResources ..
-func getDriftResources(ctx context.Context, services []string, confDir, randomID string) ([]string, error) {
+func getDriftResources(ctx context.Context, services []string, localTFDir, randomID string) ([]string, error) {
 	logger := utils.GetLogger(ctx)
 	var driftResourceList []string
 
 	//Generate terraform plan
 	planText := "-out=" + base.PlanTextFile
-	err := tfplugin.TerraformPlan(confDir, planText, planTimeOut, randomID)
+	err := tfplugin.TerraformPlan(localTFDir, planText, planTimeOut, randomID)
 	if err != nil {
 		logger.Failed("ERROR:  Failed to generate terraform plan : %v", err)
 		return nil, err
@@ -138,7 +142,7 @@ func getDriftResources(ctx context.Context, services []string, confDir, randomID
 
 	//Convert plan file to json format
 	planJSON := base.PlanTextFile + " > " + base.PlanJSONFile
-	err = tfplugin.GenerateTerraformPlanJson(confDir, planJSON, planTimeOut, randomID)
+	err = tfplugin.GenerateTerraformPlanJson(localTFDir, planJSON, planTimeOut, randomID)
 	if err != nil {
 		logger.Failed("ERROR:  Failed to convert terraform plan file to json : %v", err)
 		return nil, err
@@ -173,7 +177,7 @@ func getDriftResources(ctx context.Context, services []string, confDir, randomID
 func getDependentResource(ctx context.Context, driftResources []string) error {
 	logger := utils.GetLogger(ctx)
 	var dependentResourceList []string
-	r, _ := regexp.Compile("^[A-Za-z-_]+\\.tf$")
+	r, _ := regexp.Compile(`^[A-Za-z-_]+\\.tf$`)
 
 	// Check is there any other resource which has got reference of the removing resource
 	// If yes, Prepare the list and ask user to fix the reference issue before delete operation
@@ -221,7 +225,7 @@ func getDependentResource(ctx context.Context, driftResources []string) error {
 	if len(dependentResourceList) > 0 {
 		logger.Warn("WARN: Discovery tool going to delete drift resources '%v' from .tf/state file.", driftResources)
 		logger.Warn("WARN: But there is a references of drift resources in following resources '%v', Please remove the drift resource reference from .tf file and run the command again..", dependentResourceList)
-		return fmt.Errorf("Failed to remove the drift resource '%v' reference from .tf file.", driftResources)
+		return fmt.Errorf("failed to remove the drift resource '%v' reference from .tf file.", driftResources)
 	}
 
 	return nil
@@ -232,7 +236,7 @@ func ValidateResourceType(services []string, resourceType string) bool {
 	_, b, _, _ := runtime.Caller(0)
 	basepath := filepath.Dir(b)
 
-	resourceFile, err := ioutil.ReadFile(basepath + "/resources.yml")
+	resourceFile, err := ioutil.ReadFile(basepath + utils.PathSep + "resources.yml")
 	if err != nil {
 		panic(err)
 	}

@@ -99,7 +99,7 @@ func CloneRepo(msg ConfigRequest) ([]byte, string, error) {
 	baseName := filepath.Base(urlPath.Path)
 	extName := filepath.Ext(urlPath.Path)
 	p := baseName[:len(baseName)-len(extName)]
-	if _, err := os.Stat(currentDir + "/" + p); err == nil {
+	if _, err := os.Stat(currentDir + utils.PathSep + p); err == nil {
 		stdouterr, err = pullRepo(p)
 
 	} else {
@@ -111,7 +111,7 @@ func CloneRepo(msg ConfigRequest) ([]byte, string, error) {
 			return nil, "", err
 		}
 	}
-	path := currentDir + "/" + p + "/terraform.tfvars"
+	path := currentDir + utils.PathSep + p + utils.PathSep + "terraform.tfvars"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		createFile(msg, path)
 	} else {
@@ -143,7 +143,7 @@ func createFile(msg ConfigRequest, path string) {
 func pullRepo(repoName string) ([]byte, error) {
 	cmd := exec.Command("git", "pull")
 	fmt.Println(cmd.Args)
-	cmd.Dir = currentDir + "/" + repoName
+	cmd.Dir = currentDir + utils.PathSep + repoName
 	stdoutStderr, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, err
@@ -233,7 +233,8 @@ func ReadFile(ctx context.Context, filepath string) ([]byte, error) {
 }
 
 // CleanUpDiscoveryFiles ..
-func CleanUpDiscoveryFiles(confDir, discoveryDir string) error {
+func CleanUpDiscoveryFiles(localTFDir, discoveryDir string) error {
+
 	//Remove discovery generated folder
 	err := utils.RemoveDir(discoveryDir)
 	if err != nil {
@@ -242,7 +243,7 @@ func CleanUpDiscoveryFiles(confDir, discoveryDir string) error {
 	}
 
 	//Remove terraform.tfstate file genearted during merge
-	files, err := filepath.Glob(confDir + "/terraform.tfstate.*.backup")
+	files, err := filepath.Glob(localTFDir + "/terraform.tfstate.*.backup")
 	if err != nil {
 		panic(err)
 	}
@@ -254,7 +255,7 @@ func CleanUpDiscoveryFiles(confDir, discoveryDir string) error {
 	}
 
 	//Remove terraform.tfstate file genearted during merge
-	files, err = filepath.Glob(confDir + "/tfplan.*")
+	files, err = filepath.Glob(localTFDir + "/tfplan.*")
 	if err != nil {
 		panic(err)
 	}
