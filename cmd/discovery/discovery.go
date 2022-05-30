@@ -76,6 +76,44 @@ func main() {
 			},
 		},
 		{
+			Category:    "discovery",
+			Name:        "metronome",
+			Description: "Tick every 2 seconds for given time in mins",
+			Usage: fmt.Sprint(
+				"discovery",
+				" metronome",
+				" [--at AT]",
+				" [--for FOR]",
+			),
+			Flags: []cli.Flag{
+				cli.IntFlag{
+					Name:  "for",
+					Usage: "for how much time in minutes",
+					Value: 2,
+				},
+				cli.IntFlag{
+					Name:  "at",
+					Usage: "tick at which interval in seconds",
+					Value: 2,
+				},
+			},
+			Action: func(c *cli.Context) error {
+
+				start_time := time.Now()
+
+				secs := c.Int("at")
+				mins := c.Int("for")
+				for time.Since(start_time) < time.Duration(mins)*time.Minute {
+					ui.Print("Ticking at ", time.Now())
+					time.Sleep(time.Duration(secs) * time.Second)
+				}
+				return nil
+			},
+			OnUsageError: func(ctx *cli.Context, err error, isSub bool) error {
+				return cli.ShowCommandHelp(ctx, ctx.Args().First())
+			},
+		},
+		{
 			Category: "discovery",
 			Name:     "config",
 			Aliases:  []string{"configure"},
