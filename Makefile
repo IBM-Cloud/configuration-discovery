@@ -148,4 +148,5 @@ build-cli:
 .PHONY: install-cli
 install-cli:
 	cd cmd/discovery; go install
+	cp -r ~/go/bin/discovery /usr/local/bin
 	

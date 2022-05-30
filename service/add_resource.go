@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"reflect"
@@ -19,8 +20,8 @@ import (
 func DiscoveryImport(ctx context.Context, services, tags string, compact bool, randomID, discoveryDir string) error {
 	logger := utils.GetLogger(ctx)
 	logger.Say("INFO:  let's import the resources (%s) 2/6:\n", services)
-	// Import the terraform resources & state files.
 
+	// import the terraform resources & state files.
 	err := tfplugin.TerraformerImport(discoveryDir, services, tags, compact, planTimeOut, randomID)
 	if err != nil {
 		logger.Failed("ERROR:  %v", err)
@@ -30,7 +31,7 @@ func DiscoveryImport(ctx context.Context, services, tags string, compact bool, r
 	logger.Say("INFO:  Writing HCL Done!")
 	logger.Say("INFO:  Writing TFState Done!")
 
-	//Check terraform version compatible
+	// check terraform version compatible
 	logger.Say("INFO:  now, we can do some infra as code ! First, update the IBM Terraform provider to support TF 0.13 [3/6]:")
 	err = UpdateProviderFile(ctx, discoveryDir, randomID, planTimeOut)
 	if err != nil {
@@ -38,7 +39,7 @@ func DiscoveryImport(ctx context.Context, services, tags string, compact bool, r
 		return err
 	}
 
-	//Run terraform init commnd
+	// run terraform init commnd
 	logger.Say("INFO:  we need to init our Terraform project [4/6]:")
 	err = tfplugin.TerraformInit(discoveryDir, planTimeOut, randomID)
 	if err != nil {
@@ -46,7 +47,7 @@ func DiscoveryImport(ctx context.Context, services, tags string, compact bool, r
 		return err
 	}
 
-	//Run terraform refresh commnd on the generated state file
+	// run terraform refresh commnd on the generated state file
 	logger.Say("INFO:  and finally compare what we imported with what we currently have [5/6]:")
 	err = tfplugin.TerraformRefresh(discoveryDir, planTimeOut, randomID)
 	if err != nil {
@@ -81,7 +82,7 @@ func UpdateProviderFile(ctx context.Context, discoveryDir, randomID string, time
 		return err
 	}
 
-	//Replace provider path in state file
+	// replace provider path in state file
 	err = tfplugin.TerraformReplaceProvider(discoveryDir, randomID, planTimeOut)
 	if err != nil {
 		logger.Failed("ERROR:  %v", err)
@@ -94,75 +95,93 @@ func UpdateProviderFile(ctx context.Context, discoveryDir, randomID string, time
 // MergeResources ..
 func MergeResources(ctx context.Context, terraformerStateFile, terraformStateFile, discoveryDir, localDir, randomID string, timeout time.Duration) error {
 	logger := utils.GetLogger(ctx)
-
 	logger.Say("INFO:  Merge local tf/state file with discovery generated tf/state file!!")
+
+	// initialize
+	var addResourceList []tfplugin.Resource
+	hclConf := []byte("\n")
 	provider := tfplugin.NewIbmProvider()
 	providerWrapper, err := tfplugin.Import(provider, []string{})
 	if err != nil {
 		log.Fatalln("ERROR: Could not create IBM Cloud provider schema object:", err)
 	}
 
-	//Read terraform state file from local & discovery repo directory
-	localRepoMap := ReadTerraformStateFile13(ctx, terraformStateFile, "")
-	discoveryRepoMap := ReadTerraformStateFile13(ctx, terraformerStateFile, "discovery")
+	// get resource attributes
+	resourceAtrrs, err := getResourceIgnoredAttributes()
+	if err != nil {
+		return fmt.Errorf("ERROR: Failed to parse resource attributes yaml file.")
+	}
 
-	//Read local repo state file content
-	//Post merge will update the depends_on values of local state file
+	// read local repo state file content
 	terraformStateFileData, err := ioutil.ReadFile(terraformerStateFile)
 	if err != nil {
 		logger.Failed("ERROR:  %v", err)
 		return err
 	}
-
 	statefilecontent := string(terraformStateFileData)
-	var addResourceList []tfplugin.Resource
-	hclConf := []byte("\n")
-	//Loop through each discovery repo resource with local repo resource
+
+	// read terraform state file from local & discovery repo directory
+	localRepoMap := ReadTerraformStateFile13(ctx, terraformStateFile, "")
+	discoveryRepoMap := ReadTerraformStateFile13(ctx, terraformerStateFile, "discovery")
+
+	// loop through each discovery repo resource with local repo resource
 	for _, discovery := range discoveryRepoMap {
-		//Discovery resource
+		// discovery resource
 		discoveryResource := discovery.(tfplugin.Resource)
 
-		//Check discovery resource exist in local repo.
-		//If resource not exist, Move the discovery resource to local repo
+		// check discovery resource exist in local repo.
+		// if resource not exist, Move the discovery resource to local repo
 		if localRepoMap[discoveryResource.TypeAndID] == nil {
 			resource := tfplugin.Resource{
 				Type:        discoveryResource.Type,
 				Name:        discoveryResource.Name,
 				TypeAndName: discoveryResource.TypeAndName,
-				Attributes:  RemoveComputedAttributes(discoveryResource, providerWrapper),
+				Attributes:  RemoveComputedAttributes(discoveryResource, resourceAtrrs, providerWrapper),
 			}
 
-			//Check discovery resource has got depends_on attribute
-			//If depends_on attribute exist in discovery resource, Get the depends_on resource name from local repo & update in discovery state file.
+			// check discovery resource has got depends_on attribute
+			// if depends_on attribute exist in discovery resource, Get the depends_on resource name from local repo & update in discovery state file.
 			if discoveryResource.DependsOn != nil {
 				var dependsOn []string
 
 				for i, d := range discoveryResource.DependsOn {
 					localParentResource := discoveryRepoMap[d].(tfplugin.Resource).TypeAndID
 
-					//Get parent resource from local repo
+					// check dependent resource exist in local repo
 					if localRepoMap[localParentResource] != nil {
-						//Get depends_on resource name from local repo to update in discovery state file
-						localParentResource = localRepoMap[localParentResource].(tfplugin.Resource).TypeAndName
-						dependsOn = append(dependsOn, localParentResource)
-
-						//Update depends_on parameter in discovery state file content
-						statefilecontent, err = sjson.Set(statefilecontent, "resources."+strconv.Itoa(discovery.(tfplugin.Resource).Index)+".instances.0.dependencies."+strconv.Itoa(i), localParentResource)
-						if err != nil {
-							logger.Failed("ERROR:  %v", err)
-							return err
+						// get depends_on value from local repo resource to update in discovery state file
+						// if dependent resource is from module, set module name value to depends_on attribute
+						if len(localRepoMap[localParentResource].(tfplugin.Resource).Module) > 0 {
+							dependsOn = append(dependsOn, localRepoMap[localParentResource].(tfplugin.Resource).Module)
+						} else {
+							localParentResource = localRepoMap[localParentResource].(tfplugin.Resource).TypeAndName
+							dependsOn = append(dependsOn, localParentResource)
 						}
+					} else {
+						// if deendent resource not exist in local repo, set depends_on value of the discovery resource
+						localParentResource = discoveryRepoMap[d].(tfplugin.Resource).TypeAndName
+						dependsOn = append(dependsOn, discoveryRepoMap[d].(tfplugin.Resource).TypeAndName)
+					}
+
+					// update depends_on parameter in discovery state file content
+					statefilecontent, err = sjson.Set(statefilecontent, "resources."+strconv.Itoa(discovery.(tfplugin.Resource).Index)+".instances.0.dependencies."+strconv.Itoa(i), localParentResource)
+					if err != nil {
+						logger.Failed("ERROR:  %v", err)
+						return err
 					}
 				}
+
+				// set dependsOn to resource
 				if len(dependsOn) > 0 {
 					resource.DependsOn = dependsOn
 				}
 			}
+
 			addResourceList = append(addResourceList, resource)
 		}
 	}
 
-	//Copy the state file content changes to discovery repo state file
+	// copy the state file content changes to discovery repo state file
 	if len(statefilecontent) > 0 {
 		err = ioutil.WriteFile(terraformerStateFile, []byte(statefilecontent), 0644)
 		if err != nil {
@@ -171,7 +190,7 @@ func MergeResources(ctx context.Context, terraformerStateFile, terraformStateFil
 		}
 	}
 
-	//Move resources from discovery repo to local repo
+	// move resources from discovery repo to local repo
 	if len(addResourceList) > 0 {
 		for _, resource := range addResourceList {
 			err = tfplugin.TerraformMoveResource(discoveryDir, terraformerStateFile, terraformStateFile, resource.TypeAndName, planTimeOut, randomID)
@@ -181,7 +200,7 @@ func MergeResources(ctx context.Context, terraformerStateFile, terraformStateFil
 			}
 		}
 
-		//Print HCL
+		// print HCL
 		providerData := map[string]interface{}{}
 		data, err := tfplugin.HclPrintResource(addResourceList, providerData, "hcl")
 		if err != nil {
@@ -198,32 +217,50 @@ func MergeResources(ctx context.Context, terraformerStateFile, terraformStateFil
 	return nil
 }
 
-//Remove computed/optional parameter from resource
-func RemoveComputedAttributes(resource tfplugin.Resource, providerWrapper *tfplugin.ProviderWrapper) map[string]interface{} {
-	//Get computed attributes
-	readOnlyAttributes := []string{}
-	obj := providerWrapper.GetSchema().ResourceTypes[resource.Type]
-	readOnlyAttributes = append(readOnlyAttributes, "id")
-	for k, v := range obj.Block.Attributes {
-		if !v.Optional && !v.Required {
-			readOnlyAttributes = append(readOnlyAttributes, k)
+// Remove computed/optional parameter from resource
+func RemoveComputedAttributes(resource tfplugin.Resource, resourceIgnoredAtrrs map[string]interface{}, providerWrapper *tfplugin.ProviderWrapper) map[string]interface{} {
+	// get resource attributes from provider schema
+	resourceSchema := providerWrapper.GetSchema().ResourceTypes[resource.Type]
+	for k, attr := range resourceSchema.Block.Attributes {
+		if !attr.Optional && !attr.Required {
+			delete(resource.Attributes, k)
+			continue
+		}
+
+		// remove ignored attributes
+		if resourceIgnoredAtrrs[resource.Type] != nil {
+			ignoreAttrs := resourceIgnoredAtrrs[resource.Type].(map[interface{}]interface{})
+			if ignoreAttrs["ignore_keys"] != nil {
+				for _, v := range ignoreAttrs["ignore_keys"].([]interface{}) {
+					delete(resource.Attributes, v.(string))
+				}
+			}
 		}
 	}
 
-	//Remove computed attributes
+	// remove computed attributes from resource
 	for key, value := range resource.Attributes {
 		switch t := value.(type) {
 		case interface{}:
 			v := reflect.ValueOf(t)
-			if v.Kind() != reflect.Bool && (v.Len() == 0 || utils.Contains(readOnlyAttributes, key)) {
+			if v.Kind() == reflect.Float32 || v.Kind() == reflect.Float64 {
+				continue
+			}
+			if v.Kind() != reflect.Bool && v.Len() == 0 {
 				delete(resource.Attributes, key)
 			}
+
+			if key == "timeouts" {
+				delete(resource.Attributes, key)
+			}
+
 		default:
-			if value == nil || utils.Contains(readOnlyAttributes, key) {
+			if value == nil {
 				delete(resource.Attributes, key)
 			}
 		}
 	}
+	delete(resource.Attributes, "id")
 
 	return resource.Attributes
 }

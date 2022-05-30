@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	"github.com/IBM-Cloud/configuration-discovery/tfplugin"
 	"github.com/IBM-Cloud/configuration-discovery/utils"
@@ -22,6 +23,7 @@ type TerraformState struct {
 type Resources struct {
 	Instances []Instances `json:"instances"`
 	Mode      string      `json:"mode"`
+	Module    string      `json:"module"`
 	Type      string      `json:"type"`
 	Name      string      `json:"name"`
 }
@@ -59,7 +61,7 @@ type PrimaryBody struct {
 // TF 0.12 compatible
 func ReadTerraformerStateFile(ctx context.Context, terraformerStateFile string) ResourceList {
 	var rList ResourceList
-	tfData := TerraformState{}
+	tfStateFile := TerraformState{}
 
 	logger := utils.GetLogger(ctx)
 
@@ -69,20 +71,20 @@ func ReadTerraformerStateFile(ctx context.Context, terraformerStateFile string) 
 		os.Exit(1)
 	}
 
-	err = json.Unmarshal([]byte(tfFile), &tfData)
+	err = json.Unmarshal([]byte(tfFile), &tfStateFile)
 	if err != nil {
 		logger.Failed("ERROR:  %v", err)
 		os.Exit(1)
 	}
 
-	for i := 0; i < len(tfData.Modules); i++ {
+	for i := 0; i < len(tfStateFile.Modules); i++ {
 		resource := tfplugin.Resource{}
-		for k := range tfData.Modules[i].Resources {
+		for k := range tfStateFile.Modules[i].Resources {
 			resource.Name = k
-			resource.Type = tfData.Modules[i].Resources[k].ResourceType
-			for p := range tfData.Modules[i].Resources[k].Primary {
+			resource.Type = tfStateFile.Modules[i].Resources[k].ResourceType
+			for p := range tfStateFile.Modules[i].Resources[k].Primary {
 				if p == "attributes" {
-					resource.ID = tfData.Modules[i].Resources[k].Primary[p].ID
+					resource.ID = tfStateFile.Modules[i].Resources[k].Primary[p].ID
 				}
 			}
 			rList = append(rList, resource)
@@ -97,7 +99,7 @@ func ReadTerraformerStateFile(ctx context.Context, terraformerStateFile string) 
 // TF 0.13+ compatible
 func ReadTerraformStateFile13(ctx context.Context, terraformStateFile, repoType string) map[string]interface{} {
 	resources := make(map[string]interface{})
-	tfData := TerraformState{}
+	tfStateFile := TerraformState{}
 	logger := utils.GetLogger(ctx)
 
 	tfFile, err := ioutil.ReadFile(terraformStateFile)
@@ -106,42 +108,57 @@ func ReadTerraformStateFile13(ctx context.Context, terraformStateFile, repoType 
 		os.Exit(1)
 	}
 
-	err = json.Unmarshal([]byte(tfFile), &tfData)
+	err = json.Unmarshal([]byte(tfFile), &tfStateFile)
 	if err != nil {
 		logger.Failed("ERROR:  %v", err)
 		os.Exit(1)
 	}
 
-	for i := 0; i < len(tfData.Resources); i++ {
+	for i := 0; i < len(tfStateFile.Resources); i++ {
+		tfResource := tfStateFile.Resources[i]
+
 		//Don't process the mode type with 'data' value
-		if tfData.Resources[i].Mode == "data" {
+		if tfStateFile.Resources[i].Mode == "data" {
 			continue
 		}
 
-		resource := tfplugin.Resource{
-			Type:        tfData.Resources[i].Type,
-			Name:        tfData.Resources[i].Name,
-			TypeAndName: tfData.Resources[i].Type + "." + tfData.Resources[i].Name,
-			Attributes:  tfData.Resources[i].Instances[0].Attributes,
+		newResource := tfplugin.Resource{
+			Type:        tfResource.Type,
+			Name:        tfResource.Name,
+			TypeAndName: tfResource.Type + "." + tfResource.Name,
+			Attributes:  tfResource.Instances[0].Attributes,
+			Module:      tfResource.Module,
 		}
 
-		for k := 0; k < len(tfData.Resources[i].Instances); k++ {
+		for k := 0; k < len(tfResource.Instances); k++ {
 			var key string
-			resourceId := fmt.Sprintf("%v", tfData.Resources[i].Instances[k].Attributes["id"])
-			resource.ID = bytes.NewBuffer([]byte(resourceId)).String()
-			if tfData.Resources[i].Instances[k].DependsOn != nil {
-				resource.DependsOn = tfData.Resources[i].Instances[k].DependsOn
+			var dependsOn []string
+
+			resourceId := fmt.Sprintf("%v", tfResource.Instances[k].Attributes["id"])
+			newResource.ID = bytes.NewBuffer([]byte(resourceId)).String()
+
+			if tfResource.Instances[k].DependsOn != nil {
+				for _, dependOn := range tfResource.Instances[k].DependsOn {
+					if strings.HasPrefix("module.", dependOn) {
+						result := strings.Split(dependOn, ".")
+						dependsOn = append(dependsOn, fmt.Sprintf("%s.%s", result[0], result[1]))
+					} else {
+						dependsOn = append(dependsOn, dependOn)
+					}
+				}
+				newResource.DependsOn = dependsOn
 			}
 
 			if repoType == "discovery" {
-				key = resource.TypeAndName
-				resource.TypeAndID = resource.Type + "." + resource.ID
+				key = newResource.TypeAndName
+				newResource.TypeAndID = newResource.Type + "." + newResource.ID
 			} else {
-				key = resource.Type + "." + resource.ID
-				resource.TypeAndID = key
+				key = newResource.Type + "." + newResource.ID
+				newResource.TypeAndID = key
 			}
-			resource.Index = i
-			resources[key] = resource
+
+			newResource.Index = i
+			resources[key] = newResource
 		}
 	}
 

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
+
 	"regexp"
-	"runtime"
+
 	"time"
 
 	"github.com/IBM-Cloud/configuration-discovery/base"
@@ -17,7 +17,6 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	tfjson "github.com/hashicorp/terraform-json"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 // Remove de-provisioned resources from local .tf/state files
@@ -25,7 +24,7 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 	logger := utils.GetLogger(ctx)
 	logger.Say("INFO: Remove the drift resources from .tfstate file from local repo.")
 
-	//Get drift resources
+	// get drift resources
 	driftResourceList, err := getDriftResources(ctx, services, localTFDir, randomID)
 	if err != nil {
 		logger.Failed("ERROR: %v.", err)
@@ -33,21 +32,21 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 	}
 
 	if len(driftResourceList) > 0 {
-		//Check any resource depends on drift resources
+		// check any resource depends on drift resources
 		err := getDependentResource(ctx, driftResourceList)
 		if err != nil {
 			logger.Failed("ERROR:  %v", err)
 			return err
 		}
 
-		//Create backup folder
+		// create backup folder
 		backupFolder, err := utils.CreateBackupFolder(base.DiscoveryBackupFolder)
 		if err != nil {
 			logger.Failed("ERROR:  %v", err)
 			return err
 		}
 
-		//Take backup of terraform.tfstate file
+		// take backup of terraform.tfstate file
 		srcFile := localTFDir + utils.PathSep + "terraform.tfstate"
 		destFile := localTFDir + utils.PathSep + backupFolder + utils.PathSep + "terraform.tfstate_bkp"
 		err = utils.Copy(srcFile, destFile)
@@ -56,8 +55,7 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 			return err
 		}
 
-		//Remove resources from .tf/state file
-		r, _ := regexp.Compile(`^[A-Za-z-_]+\\.tf$`)
+		// remove resources from .tf/state file
 		files, err := ioutil.ReadDir(".")
 		if err != nil {
 			logger.Failed("ERROR:  %v", err)
@@ -65,7 +63,8 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 
 		var toBeWritten *hclwrite.File
 		for _, file := range files {
-			if r.MatchString(file.Name()) {
+			match, _ := regexp.MatchString("^[A-Za-z-_]+\\.tf$", file.Name())
+			if match {
 				info, err := os.Lstat(file.Name())
 				if err != nil {
 					logger.Failed("ERROR:  %v", err)
@@ -86,7 +85,7 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 						_, found := Find(driftResourceList, resTypeAndName)
 						if found {
 							backupCount++
-							//Take Backup of .TF file.
+							// take Backup of .TF file.
 							if backupCount == 1 {
 								srcFile = localTFDir + utils.PathSep + file.Name()
 								destFile = localTFDir + utils.PathSep + backupFolder + utils.PathSep + file.Name() + "_bkp"
@@ -97,9 +96,9 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 								}
 							}
 
-							//Remove resource block from .tf file
+							// remove resource block from .tf file
 							toBeWritten.Body().RemoveBlock(block)
-							//Remove resource from terraform.tfstate file
+							// remove resource from terraform.tfstate file
 							err = tfplugin.TerraformStateRemove(localTFDir, resTypeAndName, randomID, planTimeOut)
 							if err != nil {
 								logger.Say("INFO: Failed to remove resource '%v' from .tf file.", resTypeAndName)
@@ -110,13 +109,14 @@ func DeleteDriftResources(ctx context.Context, services []string, localTFDir, ra
 						}
 					}
 				}
-				// Write back the update content to .tf file
-				err = ioutil.WriteFile(file.Name(), toBeWritten.Bytes(), info.Mode())
-				if err != nil {
-					logger.Failed("ERROR:  %v", err)
-					return nil
+				// write back the update content to .tf file
+				if backupCount > 0 {
+					err = ioutil.WriteFile(file.Name(), toBeWritten.Bytes(), info.Mode())
+					if err != nil {
+						logger.Failed("ERROR:  %v", err)
+						return nil
+					}
 				}
-
 			}
 		}
 		logger.Say("INFO:  Discovery deleted resources '%v' successfully.", driftResourceList)
@@ -132,7 +132,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 	logger := utils.GetLogger(ctx)
 	var driftResourceList []string
 
-	//Generate terraform plan
+	// generate terraform plan
 	planText := "-out=" + base.PlanTextFile
 	err := tfplugin.TerraformPlan(localTFDir, planText, planTimeOut, randomID)
 	if err != nil {
@@ -140,7 +140,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 		return nil, err
 	}
 
-	//Convert plan file to json format
+	// convert plan file to json format
 	planJSON := base.PlanTextFile + " > " + base.PlanJSONFile
 	err = tfplugin.GenerateTerraformPlanJson(localTFDir, planJSON, planTimeOut, randomID)
 	if err != nil {
@@ -148,7 +148,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 		return nil, err
 	}
 
-	//Unmarshal plan json file
+	// unmarshal plan json file
 	var planIntf tfjson.Plan
 	planData, err := ReadFile(ctx, base.PlanJSONFile)
 	planErr := planIntf.UnmarshalJSON(planData)
@@ -157,11 +157,19 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 		return nil, err
 	}
 
-	//Get drift resources
+	// get service resources
+	serviceResources, err := getServiceResources()
+	if err != nil {
+		logger.Failed("ERROR:  Failed to convert terraform plan file to json : %v", err)
+		return nil, err
+	}
+
+	// get drift resources
 	for _, resource := range planIntf.ResourceChanges {
 		for _, action := range resource.Change.Actions {
 			if action == tfjson.ActionCreate {
-				if ValidateResourceType(services, resource.Type) {
+				// check resource Type is part of imported service resources
+				if isServiceResource(services, resource.Type, serviceResources) {
 					driftResourceList = append(driftResourceList, resource.Address)
 				} else {
 					logger.Warn("WARN: : Drift resource '%v' is not part of services '%v'", resource.Address, services)
@@ -179,8 +187,8 @@ func getDependentResource(ctx context.Context, driftResources []string) error {
 	var dependentResourceList []string
 	r, _ := regexp.Compile(`^[A-Za-z-_]+\\.tf$`)
 
-	// Check is there any other resource which has got reference of the removing resource
-	// If yes, Prepare the list and ask user to fix the reference issue before delete operation
+	// check is there any other resource which has got reference of the removing resource
+	// if yes, Prepare the list and ask user to fix the reference issue before delete operation
 	var toBeWritten *hclwrite.File
 	files, err := ioutil.ReadDir(".")
 	if err != nil {
@@ -188,7 +196,7 @@ func getDependentResource(ctx context.Context, driftResources []string) error {
 		return err
 	}
 
-	//Prepare resource reference list
+	// prepare resource reference list
 	for _, file := range files {
 		if r.MatchString(file.Name()) {
 			b, err := ioutil.ReadFile(file.Name())
@@ -211,9 +219,9 @@ func getDependentResource(ctx context.Context, driftResources []string) error {
 					resTypeAndName = block.Type()
 				}
 
-				//Validate resource is not part of drift resource
+				// validate resource is not part of drift resource
 				if !isValueInList(driftResources, resTypeAndName, false) {
-					//Validate non-drift resource is dependent on drift resources
+					// validate non-drift resource is dependent on drift resources
 					if checkMapContainsValue(driftResources, block.Body().Attributes()) {
 						dependentResourceList = append(dependentResourceList, resTypeAndName)
 					}
@@ -231,27 +239,15 @@ func getDependentResource(ctx context.Context, driftResources []string) error {
 	return nil
 }
 
-// ValidateResourceType ..
-func ValidateResourceType(services []string, resourceType string) bool {
-	_, b, _, _ := runtime.Caller(0)
-	basepath := filepath.Dir(b)
-
-	resourceFile, err := ioutil.ReadFile(basepath + utils.PathSep + "resources.yml")
-	if err != nil {
-		panic(err)
-	}
-
-	resourceMap := make(map[string][]string)
-	err = yaml.Unmarshal(resourceFile, resourceMap)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, service := range services {
-		if resourceMap[service] != nil {
-			for _, rType := range resourceMap[service] {
-				if resourceType == rType {
-					return true
+// isServiceResource ..
+func isServiceResource(services []string, resourceType string, serviceMap map[string][]string) bool {
+	if serviceMap != nil {
+		for _, service := range services {
+			if serviceMap[service] != nil {
+				for _, rType := range serviceMap[service] {
+					if resourceType == rType {
+						return true
+					}
 				}
 			}
 		}

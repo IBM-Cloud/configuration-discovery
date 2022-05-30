@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/IBM-Cloud/configuration-discovery/utils"
@@ -18,6 +19,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/zclconf/go-cty/cty"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v2"
 )
 
 // Find takes a slice and looks for an element in it. If found it will
@@ -267,4 +269,42 @@ func CleanUpDiscoveryFiles(localTFDir, discoveryDir string) error {
 	}
 
 	return nil
+}
+
+func getServiceResources() (map[string][]string, error) {
+	_, b, _, _ := runtime.Caller(0)
+	basepath := filepath.Dir(b)
+
+	resourceFile, err := ioutil.ReadFile(basepath + utils.PathSep + "conf/services.yml")
+	if err != nil {
+		return nil, err
+	}
+
+	serviceMap := make(map[string][]string)
+	err = yaml.Unmarshal(resourceFile, serviceMap)
+	if err != nil {
+		panic(err)
+	}
+
+	return serviceMap, nil
+}
+
+func getResourceIgnoredAttributes() (map[string]interface{}, error) {
+	resourceAtrrs := map[string]interface{}{}
+
+	_, b, _, _ := runtime.Caller(0)
+	basepath := filepath.Dir(b)
+
+	content, err := ioutil.ReadFile(basepath + utils.PathSep + "conf/resource_attributes.yml")
+	if err != nil {
+		log.Fatal(err.Error())
+		return nil, err
+	}
+
+	err = yaml.Unmarshal([]byte(content), &resourceAtrrs)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return resourceAtrrs, nil
 }
