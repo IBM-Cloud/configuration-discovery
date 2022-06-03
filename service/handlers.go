@@ -1,4 +1,4 @@
-package discovery
+package service
 
 import (
 	"context"
@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBM-Cloud/configuration-discovery/terraformwrapper"
+	"github.com/IBM-Cloud/configuration-discovery/tfplugin"
 	"github.com/IBM-Cloud/configuration-discovery/utils"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gorilla/mux"
 	mgo "gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -219,7 +221,8 @@ func PlanHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 
 		go func() {
 			pullRepo(repoName)
-			err := terraformwrapper.TerraformPlan(confDir, planTimeOut, randomID)
+			planOutput := "out=state.txt"
+			err := tfplugin.TerraformPlan(confDir, planOutput, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -303,7 +306,7 @@ func ApplyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 
 			pullRepo(repoName)
 			// todo: @srikar - repoName as statefilename ??
-			err := terraformwrapper.TerraformApply(confDir, stateDir, repoName, planTimeOut, randomID)
+			err := tfplugin.TerraformApply(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -379,7 +382,7 @@ func DestroyHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request)
 		utils.ResultToSlack(outURL, errURL, "destroy", randomID, "In-Progress", webhook)
 		go func() {
 			// todo: @srikar - repo name as statefile name? name better
-			err := terraformwrapper.TerraformDestroy(confDir, stateDir, repoName, planTimeOut, randomID)
+			err := tfplugin.TerraformDestroy(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -459,7 +462,7 @@ func ShowHandler(s *mgo.Session) func(w http.ResponseWriter, r *http.Request) {
 		utils.ResultToSlack(outURL, errURL, "show", randomID, "In-Progress", webhook)
 		go func() {
 			// todo: @srikar - repoName as statefilename ? name better
-			err := terraformwrapper.TerraformShow(confDir, stateDir, repoName, planTimeOut, randomID)
+			err := tfplugin.TerraformShow(confDir, stateDir, repoName, planTimeOut, randomID)
 			if err != nil {
 				statusResponse.Error = err.Error()
 				statusResponse.Status = "Failed"
@@ -529,7 +532,7 @@ func LogHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Url Param 'action' is: " + action)
 	log.Println("Url Param 'actionID' is: " + actionID)
 
-	outFile, errFile, err := terraformwrapper.ReadLogFile(actionID)
+	outFile, errFile, err := tfplugin.ReadLogFile(actionID)
 	if err != nil {
 		http.Error(w, err.Error(), 404)
 		return
@@ -745,6 +748,56 @@ func TerraformerImportHandler(s *mgo.Session) func(w http.ResponseWriter, r *htt
 						return
 					}
 					return
+				}
+				statusResponse.Status = "Completed"
+				// Update the status in the db in case it is completed
+				err = UpdateMongodb(s, randomID, statusResponse.Status)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else if command == "merge" {
+				err = DiscoveryImport(context.Background(), services, tags, true, randomID, discoveryDir)
+				if err != nil {
+					statusResponse.Error = err.Error()
+					statusResponse.Status = "Failed"
+
+					// Update the status in the db in case it is failed
+					err = UpdateMongodb(s, randomID, statusResponse.Status)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+					return
+				}
+
+				//Merge state files and templates
+				repoDir := currentDir + utils.PathSep + configName
+				//Backup repo TF file.
+				err = utils.Copy(repoDir+"/terraform.tfstate", repoDir+"/terraform.tfstate_backup")
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				//Read state file from local repo directory
+				terraformStateFile := repoDir + "/terraform.tfstate"
+				terraformObj := ReadTerraformStateFile13(context.Background(), terraformStateFile, "")
+
+				//Read state file from discovery repo directory
+				terraformerSateFile := discoveryDir + "/terraform.tfstate"
+				terraformerObj := ReadTerraformStateFile13(context.Background(), terraformerSateFile, "discovery")
+
+				// comparing state files
+				if cmp.Equal(terraformObj, terraformerObj, cmpopts.IgnoreFields(tfplugin.Resource{}, "ResourceName")) {
+					log.Printf("# Config repo configuration/state is equal !!\n")
+				} else {
+					log.Printf("# Config repo configuration/state is not equal !!\n")
+					// err = MergeResources(context.Background(), terraformObj, terraformerObj, terraformerSateFile, terraformStateFile, discoveryDir, repoDir, randomID, planTimeOut)
+					// if err != nil {
+					// 	http.Error(w, err.Error(), http.StatusInternalServerError)
+					// 	return
+					// }
 				}
 				statusResponse.Status = "Completed"
 				// Update the status in the db in case it is completed

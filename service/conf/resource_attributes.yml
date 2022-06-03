@@ -1,0 +1,30 @@
+--- 
+ibm_iam_authorization_policy:
+  ignore_keys:
+    - resource_attributes
+    - subject_attributes
+ibm_container_cluster:
+  ignore_keys:
+    - worker_num
+    - region
+ibm_is_floating_ip:
+  ignore_keys:
+    - zone
+ibm_is_instance:
+  ignore_keys:
+    - port
+ibm_is_lb:
+  ignore_keys:
+    - profile
+ibm_is_subnet:
+  ignore_keys:
+    - total_ipv4_address_count
+ibm_is_vpc: 
+  ignore_keys:
+    - default_network_acl
+ibm_is_vpc_routing_table_route:
+  ignore_keys:
+    - action
+ibm_satellite_location:
+  ignore_keys:
+    - labels

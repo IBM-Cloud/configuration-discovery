@@ -26,6 +26,7 @@ func GetLogger(ctx context.Context) terminal.UI {
 }
 
 type logMocker struct {
+	quiet  bool
 	In     io.Reader
 	Out    io.Writer
 	ErrOut io.Writer
@@ -42,14 +43,28 @@ func newlogMocker() terminal.UI {
 
 func (l *logMocker) Say(format string, args ...interface{}) {
 	if args != nil {
-		log.Printf(format+"\n", args...)
+		log.Printf(format+"\n", args)
 	} else {
 		log.Print(format + "\n")
 	}
 }
 
+func (l *logMocker) Info(format string, args ...interface{}) {
+	l.Say(format, args)
+}
+
+func (l *logMocker) Verbose(format string, args ...interface{}) {
+	if !l.quiet {
+		l.Say(format, args)
+	}
+}
+
+func (l *logMocker) Print(format string, args ...interface{}) {
+	l.Say(format, args)
+}
+
 func (l *logMocker) Warn(format string, args ...interface{}) {
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 	l.Say(terminal.WarningColor(message))
 }
 
@@ -60,7 +75,7 @@ func (l *logMocker) Ok() {
 // todo: @srikar - change this
 func (l *logMocker) Error(format string, args ...interface{}) {
 	if args != nil {
-		log.Printf(format+"\n", args...)
+		log.Printf(format+"\n", args)
 	} else {
 		log.Print(format + "\n")
 	}
@@ -87,33 +102,33 @@ func (l *logMocker) ChoicesPrompt(message string, choices []string, options *ter
 }
 
 func (l *logMocker) Ask(format string, args ...interface{}) (answer string, err error) {
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 	err = l.Prompt(message, &terminal.PromptOptions{HideDefault: true, NoLoop: true}).Resolve(&answer)
 	return
 }
 
 func (l *logMocker) AskForPassword(format string, args ...interface{}) (passwd string, err error) {
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 	err = l.Prompt(message, &terminal.PromptOptions{HideInput: true, HideDefault: true, NoLoop: true}).Resolve(&passwd)
 	return
 }
 
 func (l *logMocker) Confirm(format string, args ...interface{}) (yn bool, err error) {
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 	err = l.Prompt(message, &terminal.PromptOptions{HideDefault: true, NoLoop: true}).Resolve(&yn)
 	return
 }
 
 func (l *logMocker) ConfirmWithDefault(defaultBool bool, format string, args ...interface{}) (yn bool, err error) {
 	yn = defaultBool
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 	err = l.Prompt(message, &terminal.PromptOptions{HideDefault: true, NoLoop: true}).Resolve(&yn)
 	return
 }
 
 func (l *logMocker) SelectOne(choices []string, format string, args ...interface{}) (int, error) {
 	var selected string
-	message := fmt.Sprintf(format, args...)
+	message := fmt.Sprintf(format, args)
 
 	err := l.ChoicesPrompt(message, choices, &terminal.PromptOptions{HideDefault: true}).Resolve(&selected)
 	if err != nil {
@@ -135,4 +150,12 @@ func (l *logMocker) Table(headers []string) terminal.Table {
 
 func (l *logMocker) Writer() io.Writer {
 	return l.Out
+}
+
+func (l *logMocker) SetQuiet(quiet bool) {
+	l.quiet = quiet
+}
+
+func (l *logMocker) Quiet() bool {
+	return l.quiet
 }

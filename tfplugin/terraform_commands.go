@@ -1,4 +1,4 @@
-package terraformwrapper
+package tfplugin
 
 import (
 	"bufio"
@@ -17,82 +17,74 @@ import (
 
 var logDir string
 
-// HCL Config ..
-type Resource struct {
-	ID                  string
-	ResourceIndex       int
-	ResourceType        string
-	ResourceName        string
-	ResourceTypeAndName string
-	ResourceTypeAndID   string
-	DependsOn           []string               `json:",omitempty"`
-	Attributes          map[string]interface{} `json:",omitempty"`
-}
-
 // TerraformInit ...
 func TerraformInit(execDir string, timeout time.Duration, randomID string) error {
 
-	return run(context.Background(), "terraform", []string{"init"}, execDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"init"}, execDir, timeout, randomID, false)
 }
 
 // TerraformApply ...
 func TerraformApply(execDir, stateDir string, stateFileName string, timeout time.Duration, randomID string) error {
-	return run(context.Background(), "terraform", []string{"apply", fmt.Sprintf("-state=%s", stateDir+utils.PathSep+stateFileName+".tfstate"), "-auto-approve"}, execDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"apply", fmt.Sprintf("-state=%s", stateDir+utils.PathSep+stateFileName+".tfstate"), "-auto-approve"}, execDir, timeout, randomID, false)
 }
 
 // TerraformPlan ...
-func TerraformPlan(execDir string, timeout time.Duration, randomID string) error {
-	return run(context.Background(), "terraform", []string{"plan"}, execDir, timeout, randomID)
+func TerraformPlan(execDir, planOutput string, timeout time.Duration, randomID string) error {
+	return run(context.Background(), "terraform", []string{"plan", planOutput}, execDir, timeout, randomID, false)
 }
 
 //TerraformRefresh ...
 func TerraformRefresh(configDir string, timeout time.Duration, randomID string) error {
-	return run(context.Background(), "terraform", []string{"refresh"}, configDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"refresh"}, configDir, timeout, randomID, false)
 }
 
 // TerraformDestroy ...
 func TerraformDestroy(execDir, stateDir string, stateFileName string, timeout time.Duration, randomID string) error {
 
-	return run(context.Background(), "terraform", []string{"destroy", "-force", fmt.Sprintf("-state=%s", stateDir+utils.PathSep+stateFileName+".tfstate")}, execDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"destroy", "-force", fmt.Sprintf("-state=%s", stateDir+utils.PathSep+stateFileName+".tfstate")}, execDir, timeout, randomID, false)
 }
 
 // TerraformShow ...
 func TerraformShow(execDir, stateDir string, stateFileName string, timeout time.Duration, randomID string) error {
 
-	return run(context.Background(), "terraform", []string{"show", stateDir + utils.PathSep + stateFileName + ".tfstate"}, execDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"show", stateDir + utils.PathSep + stateFileName + ".tfstate"}, execDir, timeout, randomID, false)
+}
+
+// TerraformShow ...
+func TerraformStateRemove(execDir, resourceTypeAndName string, randomID string, timeout time.Duration) error {
+
+	return run(context.Background(), "terraform", []string{"state", "rm", resourceTypeAndName}, execDir, timeout, randomID, false)
 }
 
 //TerraformerImport ...
 func TerraformerImport(configDir, resources, tags string, compact bool, timeout time.Duration, randomID string) error {
 
 	if compact {
-
-		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, "--compact", fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID)
+		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, "--compact", fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID, false)
 	} else {
-		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID)
+		return run(context.Background(), "terraformer", []string{"import", "ibm", fmt.Sprintf("--resources=%s", resources), tags, fmt.Sprintf("-p=%s", configDir)}, configDir, timeout, randomID, false)
 	}
 }
 
 //TerraformMoveResource ...
 func TerraformMoveResource(configDir, srcStateFile, destStateFile, resourceName string, timeout time.Duration, randomID string) error {
 
-	return run(context.Background(), "terraform", []string{"state", "mv", fmt.Sprintf("-state=%s", srcStateFile), fmt.Sprintf("-state-out=%s", destStateFile), resourceName, resourceName}, configDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"state", "mv", fmt.Sprintf("-state=%s", srcStateFile), fmt.Sprintf("-state-out=%s", destStateFile), resourceName, resourceName}, configDir, timeout, randomID, false)
 }
 
 //TerraformReplaceProvider ..
 func TerraformReplaceProvider(configDir, randomID string, timeout time.Duration) error {
 	//terraform state
-	return run(context.Background(), "terraform", []string{"state", "replace-provider", "-auto-approve", "registry.terraform.io/-/ibm", "registry.terraform.io/ibm-cloud/ibm"}, configDir, timeout, randomID)
+	return run(context.Background(), "terraform", []string{"state", "replace-provider", "-auto-approve", "registry.terraform.io/-/ibm", "registry.terraform.io/ibm-cloud/ibm"}, configDir, timeout, randomID, false)
 }
 
-// TerraformVersion ...
-func TerraformVersion(execDir string, timeout time.Duration, randomID string) error {
-
-	return run(context.Background(), "terraform", []string{"verson"}, execDir, timeout, randomID)
+// GenerateTerraformPlanJson ...
+func GenerateTerraformPlanJson(execDir, planOutput string, timeout time.Duration, randomID string) error {
+	return run(context.Background(), fmt.Sprintf("%s %s %s %s", "terraform", "show", "-json", planOutput), []string{}, execDir, timeout, randomID, true)
 }
 
 // todo: @srikar - Make attribute function, remove too many func arguments
-func run(ctx context.Context, cmdName string, args []string, execDir string, timeout time.Duration, randomID string) error {
+func run(ctx context.Context, cmdName string, args []string, execDir string, timeout time.Duration, randomID string, bash bool) error {
 	if timeout == 0 {
 		timeout = 3 * time.Minute
 	}
@@ -100,7 +92,14 @@ func run(ctx context.Context, cmdName string, args []string, execDir string, tim
 	ui := utils.GetLogger(ctx)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
-	cmd := exec.CommandContext(ctx, cmdName, args...)
+	var cmd *exec.Cmd
+	if bash {
+		//TODO: move terraform show stdout to file
+		cmd = exec.Command("bash", "-c", cmdName)
+	} else {
+		cmd = exec.CommandContext(ctx, cmdName, args...)
+	}
+
 	defer cancel()
 
 	cmd.Dir = execDir
@@ -120,7 +119,7 @@ func run(ctx context.Context, cmdName string, args []string, execDir string, tim
 	}
 
 	if randomID != "" {
-		stdoutFile, stderrFile, err := getLogFiles(logDir, randomID)
+		stdoutFile, stderrFile, err := getLogFiles("/tmp", randomID)
 		if err != nil {
 			return err
 		}

@@ -147,5 +147,6 @@ build-cli:
 
 .PHONY: install-cli
 install-cli:
-	cd cmd/discovery; go install
+	cd cmd/discovery; go install -ldflags='-X main.buildDate=${BUILD_DATE}'
+	cp -r ~/go/bin/discovery /usr/local/bin
 	

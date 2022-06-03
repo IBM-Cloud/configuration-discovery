@@ -7,21 +7,23 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/IBM-Cloud/configuration-discovery/discovery"
+	"github.com/IBM-Cloud/configuration-discovery/service"
 	"github.com/IBM-Cloud/configuration-discovery/utils"
 	"github.com/IBM-Cloud/ibm-cloud-cli-sdk/bluemix/terminal"
 	"github.com/urfave/cli"
 )
 
 const (
-	releasesLink = "https://github.com/IBM-Cloud/configuration-discovery/releases"
+	releasesLink = "https://github.com/anilkumarnagaraj/terraform-provider-ibm-api/releases"
 )
 
 var (
-	ui      terminal.UI
-	confDir string
-	goctx   context.Context
+	ui          terminal.UI
+	planTimeOut = 60 * time.Minute
+	confDir     string
+	goctx       context.Context
 )
 
 func init() {
@@ -69,6 +71,44 @@ func main() {
 				" version",
 			),
 			Action: actForVersion,
+			OnUsageError: func(ctx *cli.Context, err error, isSub bool) error {
+				return cli.ShowCommandHelp(ctx, ctx.Args().First())
+			},
+		},
+		{
+			Category:    "discovery",
+			Name:        "metronome",
+			Description: "Tick every 2 seconds for given time in mins",
+			Usage: fmt.Sprint(
+				"discovery",
+				" metronome",
+				" [--at AT]",
+				" [--for FOR]",
+			),
+			Flags: []cli.Flag{
+				cli.IntFlag{
+					Name:  "for",
+					Usage: "for how much time in minutes",
+					Value: 2,
+				},
+				cli.IntFlag{
+					Name:  "at",
+					Usage: "tick at which interval in seconds",
+					Value: 2,
+				},
+			},
+			Action: func(c *cli.Context) error {
+
+				start_time := time.Now()
+
+				secs := c.Int("at")
+				mins := c.Int("for")
+				for time.Since(start_time) < time.Duration(mins)*time.Minute {
+					ui.Print("Ticking at ", time.Now())
+					time.Sleep(time.Duration(secs) * time.Second)
+				}
+				return nil
+			},
 			OnUsageError: func(ctx *cli.Context, err error, isSub bool) error {
 				return cli.ShowCommandHelp(ctx, ctx.Args().First())
 			},
@@ -129,7 +169,7 @@ func main() {
 
 					ui.Say("Will clone git repo", gitURL)
 
-					_, repoName, err = discovery.CloneRepo(discovery.ConfigRequest{
+					_, repoName, err = service.CloneRepo(service.ConfigRequest{
 						GitURL: gitURL,
 					})
 					if err != nil {
@@ -189,6 +229,7 @@ func main() {
 				" [--tags TAGS]",
 				" [--config_name CONFIG_NAME]",
 				" [--compact]",
+				" [--merge]",
 			),
 			Description: "Import TF config for resources in your ibm cloud account. " +
 				"Import all the resources for this service. Imports config and statefile. " +
@@ -202,7 +243,9 @@ func main() {
 				cli.StringFlag{
 					Name: "config_name",
 					Usage: "Folder inside config_dir, where to import the config. " +
-						"A folder with prefix discovery is created inside the config_dir, if not given. ",
+						"A folder with prefix discovery is created inside the config_dir, if not given. " +
+						"If this folder has some tf config already, merge flag has to be given. Imported" +
+						"tf config will be merge to existing config then.",
 					Value: "",
 				},
 				cli.StringFlag{
@@ -213,6 +256,10 @@ func main() {
 					Name: "compact",
 					Usage: "Use --compact to generate all the terraform code into one single file. " +
 						"If not passed, a file is created for each resource",
+				},
+				cli.BoolFlag{
+					Name:  "merge",
+					Usage: "Use --merge to import and merge with config/statefile in folder config_name ",
 				},
 			},
 
@@ -226,6 +273,7 @@ func main() {
 				services := c.String("services")
 				configName := c.String("config_name")
 				isCompact := c.Bool("compact")
+				isBrownField := c.Bool("merge")
 				tags := c.String("tags")
 
 				ui.Say("config_directory is %s", confDir)
@@ -234,22 +282,38 @@ func main() {
 					ui.Warn("IC_API_KEY not exported")
 				}
 
-				b := make([]byte, 10)
+				b := make([]byte, 10) // todo: @srikar - decrease the lenghth
 				rand.Read(b)
 				randomID := fmt.Sprintf("%x", b) // todo: @srikar - change to time based
+				var localTFDir string
 
 				if configName == "" {
-					configName = "discovery" + randomID
+					if !isBrownField {
+						configName = "discovery" + randomID
+					}
 				}
 
-				discoveryDir, _ := utils.Filepathjoin(confDir, configName)
-				if _, err := os.Stat(discoveryDir); os.IsNotExist(err) {
-					ui.Say("\ncreating Folder %s for generating config", discoveryDir)
-					err = os.MkdirAll(discoveryDir, os.ModePerm)
-					if err != nil {
-						ui.Failed("Couldn't create %s, error: %v", err)
-						return err
+				greenFieldImportDir, _ := utils.Filepathjoin(confDir, configName)
+				if !isBrownField {
+					if _, err := os.Stat(greenFieldImportDir); os.IsNotExist(err) {
+						ui.Say("\ncreating Folder %s for generating config", greenFieldImportDir)
+						err = os.MkdirAll(greenFieldImportDir, os.ModePerm)
+						if err != nil {
+							ui.Failed("Couldn't create %s, error: %v", err)
+							return err
+						}
+					} else {
+						isEmpty, err := utils.IsFolderEmpty(greenFieldImportDir)
+						if err != nil {
+							ui.Warn("Couldn't open dir %s, err: %v", greenFieldImportDir, err)
+						}
+						if !isEmpty && !isBrownField {
+							ui.Failed("Folder %s should be empty", greenFieldImportDir)
+							return fmt.Errorf("config_name folder should be empty or pass --merge option to merge with existing config")
+						}
 					}
+				} else {
+					localTFDir = greenFieldImportDir
 				}
 
 				// todo: @srikar - where is opts used
@@ -269,7 +333,7 @@ func main() {
 							if len(tag) == 2 {
 								opts = append(opts, fmt.Sprintf("--%s=%s",
 									strings.TrimSpace(strings.ToLower(tag[0])), tag[1]))
-								tagsChanged += fmt.Sprintf("--%s=%s ",
+								tagsChanged += fmt.Sprintf("--%s=%s",
 									strings.TrimSpace(strings.ToLower(tag[0])), tag[1])
 							}
 						}
@@ -282,10 +346,89 @@ func main() {
 				}
 
 				ui.Say("Importing resources from ibm cloud")
-				err := discovery.DiscoveryImport(goctx, services, strings.TrimSpace(tagsChanged), isCompact, "", discoveryDir)
-				if err != nil {
-					ui.Failed("Error in Importing resources: %v", err)
-					return err
+				if !isBrownField {
+					ui.Say("folder is greenFieldImportDir", greenFieldImportDir)
+					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", greenFieldImportDir)
+					if err != nil {
+						ui.Failed("Error in Importing resources: %v", err)
+						return err
+					}
+				} else {
+					ui.Say("folder is localTFDir", localTFDir)
+					//Brown field scenario
+					// todo:  - don't we support merging just the tf files
+					if _, err := os.Stat(localTFDir + utils.PathSep + "terraform.tfstate"); os.IsNotExist(err) {
+						ui.Say("No merging needed bcz terraform statefile doesn't already exist in local repo.", localTFDir)
+						ui.Say("Done. Exiting")
+						ui.Ok()
+						return nil
+					}
+
+					//Create discovery directory
+					importDir := localTFDir + utils.PathSep + "generated" + randomID
+					if _, err := os.Stat(importDir); os.IsNotExist(err) { // todo: @srikar - always true
+						ui.Say("\ncreating Folder %s for generating config", importDir)
+						err = os.MkdirAll(importDir, os.ModePerm)
+						if err != nil {
+							ui.Failed("Couldn't create %s, error: %v", err)
+							return err
+						}
+					} else {
+						// change the randomid and try again or fail  // todo: @srikar -
+					}
+
+					serviceList := strings.Split(services, ",")
+					if len(serviceList) == 0 {
+						ui.Failed("No services were given") // todo: @srikar - what is this error @anil
+						return fmt.Errorf("no services were given")
+					}
+
+					// Import the terraform resources & state files.
+					err := service.DiscoveryImport(goctx, services, tagsChanged, isCompact, "", importDir)
+					if err != nil {
+						ui.Failed("Error with importing: %v", err)
+						return err
+					}
+
+					ui.Say("Imported resources from ibm cloud at " + importDir)
+					// if _, err := os.Stat(importDir); os.IsNotExist(err) {  // todo: @srikar - check with Anil
+					if isEmpty, err := utils.IsFolderEmpty(importDir); err != nil && isEmpty {
+						ui.Say("No configuration files after importing!!!")
+						// todo: @srikar - exit here
+					} else {
+						ui.Say("Import successful. Imported into %s\n", importDir)
+					}
+
+					//Compare & merge local & remote .tf/state file
+					terraformStateFile := localTFDir + utils.PathSep + "terraform.tfstate"
+					terraformerStateFile := importDir + utils.PathSep + "terraform.tfstate"
+					ui.Say("# Comparing and merging statefiles local %s and remote %s\n",
+						terraformStateFile, terraformerStateFile)
+
+					defer func() {
+						//Cleanup the discovery generated files
+						err = service.CleanUpDiscoveryFiles(localTFDir, importDir)
+						if err != nil {
+							ui.Warn("# there was a problem in cleaning up.", err)
+						}
+					}()
+
+					//Delete drift resources from local .tf/state file
+					err = service.DeleteDriftResources(goctx, serviceList, localTFDir, randomID, planTimeOut)
+					if err != nil {
+						ui.Warn("# Couldn't delete resource from .tf/state files", err)
+						return err
+					}
+
+					//Merge resources from remote to local .tf/state file
+					err = service.MergeResources(goctx, terraformerStateFile, terraformStateFile,
+						importDir, localTFDir, randomID, planTimeOut)
+					if err != nil {
+						ui.Warn("# Couldn't merge .tf/state files", err)
+						return err
+					}
+
+					ui.Say("Backend action: file state here finally", terraformStateFile)
 				}
 
 				ui.Say("Successful import")
