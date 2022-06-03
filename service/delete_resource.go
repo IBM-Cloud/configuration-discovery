@@ -133,7 +133,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 	var driftResourceList []string
 
 	// generate terraform plan
-	planText := "-out=" + base.PlanTextFile
+	planText := "-out=" + localTFDir + utils.PathSep + base.PlanTextFile
 	err := tfplugin.TerraformPlan(localTFDir, planText, planTimeOut, randomID)
 	if err != nil {
 		logger.Failed("ERROR:  Failed to generate terraform plan : %v", err)
@@ -141,7 +141,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 	}
 
 	// convert plan file to json format
-	planJSON := base.PlanTextFile + " > " + base.PlanJSONFile
+	planJSON := localTFDir + utils.PathSep + base.PlanTextFile + " > " + localTFDir + utils.PathSep + base.PlanJSONFile
 	err = tfplugin.GenerateTerraformPlanJson(localTFDir, planJSON, planTimeOut, randomID)
 	if err != nil {
 		logger.Failed("ERROR:  Failed to convert terraform plan file to json : %v", err)
@@ -150,7 +150,7 @@ func getDriftResources(ctx context.Context, services []string, localTFDir, rando
 
 	// unmarshal plan json file
 	var planIntf tfjson.Plan
-	planData, err := ReadFile(ctx, base.PlanJSONFile)
+	planData, err := ReadFile(ctx, localTFDir+utils.PathSep+base.PlanJSONFile)
 	planErr := planIntf.UnmarshalJSON(planData)
 	if planErr != nil {
 		logger.Failed("ERROR:  Failed to unmarshal the plan file", zap.Error(planErr))

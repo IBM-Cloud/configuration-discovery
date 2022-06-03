@@ -8,6 +8,7 @@ import (
 )
 
 var cliBuild = "0.1.1"
+var buildDate string
 
 type versionCheckInfo struct {
 	outdated bool
@@ -49,14 +50,15 @@ func actForVersion(ctx *cli.Context) error {
 		latest = info.latest
 	}
 
-	ui.Say(versionString.String())
-	ui.Say(fmt.Sprintf("on %s", platform))
+	ui.Print(versionString.String())
+	ui.Print(fmt.Sprintf("on %s", platform))
+	ui.Print(fmt.Sprintf("built at %s", buildDate))
 
-	ui.Say("List of IBM Cloud resources that can be imported:")
+	ui.Print("List of IBM Cloud resources that can be imported:")
 	PrintResources()
 
 	if outdated {
-		ui.Say(fmt.Sprintf(
+		ui.Print(fmt.Sprintf(
 			"\nYour discovery executable is out of date! The latest version\n"+
 				"is %s. You can update by downloading from %s",
 			latest, releasesLink))
